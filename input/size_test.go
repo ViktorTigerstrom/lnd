@@ -1386,9 +1386,10 @@ func genTimeoutTx(t *testing.T,
 	testPubkey := testKeyPriv.PubKey()
 
 	// Create the unsigned timeout tx.
-	timeoutTx, err := lnwallet.CreateHtlcTimeoutTx(
+	timeoutTx, _, err := lnwallet.CreateHtlcTimeoutTx(
 		chanType, false, testOutPoint, testAmt, testCLTVExpiry,
-		testCSVDelay, 0, testPubkey, testPubkey, input.NoneTapLeaf(),
+		testCSVDelay, 0, testPubkey, testPubkey, testPubkey,
+		input.NoneTapLeaf(),
 	)
 	require.NoError(t, err)
 
@@ -1455,9 +1456,9 @@ func genSuccessTx(t *testing.T, chanType channeldb.ChannelType) *wire.MsgTx {
 	testPubkey := testKeyPriv.PubKey()
 
 	// Create the unsigned success tx.
-	successTx, err := lnwallet.CreateHtlcSuccessTx(
+	successTx, _, err := lnwallet.CreateHtlcSuccessTx(
 		chanType, false, testOutPoint, testAmt, testCSVDelay, 0,
-		testPubkey, testPubkey, input.NoneTapLeaf(),
+		testPubkey, testPubkey, testPubkey, input.NoneTapLeaf(),
 	)
 	require.NoError(t, err)
 

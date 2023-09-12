@@ -20,7 +20,7 @@ import (
 // timeout and payment hash (e.g. multiple MPP shards of the same payment, where
 // the on-chain script would be identical).
 type CommitSortFunc func(tx *wire.MsgTx, cltvs []uint32,
-	indexes []input.HtlcIndex) error
+	indexes []input.HtlcIndex, signInfo []input.SignInfo) error
 
 // DefaultCommitSort is the default commitment sort function that sorts the
 // commitment transaction inputs and outputs according to BIP69. The second
@@ -28,9 +28,9 @@ type CommitSortFunc func(tx *wire.MsgTx, cltvs []uint32,
 // transaction outputs, with the value of 0 for non-HTLC outputs. The third
 // parameter is unused for the default sort function.
 func DefaultCommitSort(tx *wire.MsgTx, cltvs []uint32,
-	_ []input.HtlcIndex) error {
+	_ []input.HtlcIndex, signInfo []input.SignInfo) error {
 
-	InPlaceCommitSort(tx, cltvs)
+	InPlaceCommitSort(tx, cltvs, signInfo)
 	return nil
 }
 

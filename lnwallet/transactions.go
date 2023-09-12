@@ -40,7 +40,8 @@ var (
 // essentially acts as an off-chain covenant as it's only permitted to spend
 // the designated HTLC output, and also that spend can _only_ be used as a
 // state transition to create another output which actually allows redemption
-// or revocation of an HTLC.
+// or revocation of an HTLC. The derivation information for the output is
+// also returned as [][]*signInfo for easy inclusion in a SignDescriptor.
 //
 // In order to spend the segwit v0 HTLC output, the witness for the passed
 // transaction should be:
@@ -51,8 +52,9 @@ var (
 //   - <sender sig> <receiver sig> <preimage> <success_script> <control_block>
 func CreateHtlcSuccessTx(chanType channeldb.ChannelType, initiator bool,
 	htlcOutput wire.OutPoint, htlcAmt btcutil.Amount, csvDelay,
-	leaseExpiry uint32, revocationKey, delayKey *btcec.PublicKey,
-	auxLeaf input.AuxTapLeaf) (*wire.MsgTx, error) {
+	leaseExpiry uint32, revocationKey, delayKey,
+	commitPoint *btcec.PublicKey, auxLeaf input.AuxTapLeaf) (
+	*wire.MsgTx, []input.SignInfo, error) {
 
 	// Create a version two transaction (as the success version of this
 	// spends an output with a CSV timeout).
@@ -71,11 +73,11 @@ func CreateHtlcSuccessTx(chanType channeldb.ChannelType, initiator bool,
 	// level HTLC which forces a covenant w.r.t what can be done with all
 	// HTLC outputs.
 	scriptInfo, err := SecondLevelHtlcScript(
-		chanType, initiator, revocationKey, delayKey, csvDelay,
-		leaseExpiry, auxLeaf,
+		chanType, initiator, revocationKey, delayKey, commitPoint,
+		csvDelay, leaseExpiry, auxLeaf,
 	)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Finally, the output is simply the amount of the HTLC (minus the
@@ -85,7 +87,7 @@ func CreateHtlcSuccessTx(chanType channeldb.ChannelType, initiator bool,
 		PkScript: scriptInfo.PkScript(),
 	})
 
-	return successTx, nil
+	return successTx, []input.SignInfo{scriptInfo.SignInfo()}, nil
 }
 
 // CreateHtlcTimeoutTx creates a transaction that spends the HTLC output on the
@@ -96,6 +98,8 @@ func CreateHtlcSuccessTx(chanType channeldb.ChannelType, initiator bool,
 // uncouple the timeout and delay clauses of the HTLC contract. This
 // transaction is locked with an absolute lock-time so the sender can only
 // attempt to claim the output using it after the lock time has passed.
+// The derivation information for the output is also returned as
+// [][]*signInfo for easy inclusion in a SignDescriptor.
 //
 // In order to spend the HTLC output for segwit v0, the witness for the passed
 // transaction should be:
@@ -111,8 +115,8 @@ func CreateHtlcSuccessTx(chanType channeldb.ChannelType, initiator bool,
 func CreateHtlcTimeoutTx(chanType channeldb.ChannelType, initiator bool,
 	htlcOutput wire.OutPoint, htlcAmt btcutil.Amount,
 	cltvExpiry, csvDelay, leaseExpiry uint32,
-	revocationKey, delayKey *btcec.PublicKey,
-	auxLeaf input.AuxTapLeaf) (*wire.MsgTx, error) {
+	revocationKey, delayKey, commitPoint *btcec.PublicKey,
+	auxLeaf input.AuxTapLeaf) (*wire.MsgTx, []input.SignInfo, error) {
 
 	// Create a version two transaction (as the success version of this
 	// spends an output with a CSV timeout), and set the lock-time to the
@@ -135,11 +139,11 @@ func CreateHtlcTimeoutTx(chanType channeldb.ChannelType, initiator bool,
 	// level HTLC which forces a covenant w.r.t what can be done with all
 	// HTLC outputs.
 	scriptInfo, err := SecondLevelHtlcScript(
-		chanType, initiator, revocationKey, delayKey, csvDelay,
-		leaseExpiry, auxLeaf,
+		chanType, initiator, revocationKey, delayKey, commitPoint,
+		csvDelay, leaseExpiry, auxLeaf,
 	)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Finally, the output is simply the amount of the HTLC (minus the
@@ -149,7 +153,7 @@ func CreateHtlcTimeoutTx(chanType channeldb.ChannelType, initiator bool,
 		PkScript: scriptInfo.PkScript(),
 	})
 
-	return timeoutTx, nil
+	return timeoutTx, []input.SignInfo{scriptInfo.SignInfo()}, nil
 }
 
 // SetStateNumHint encodes the current state number within the passed

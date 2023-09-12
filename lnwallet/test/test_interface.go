@@ -3,6 +3,7 @@ package lnwallettest
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"net"
@@ -10,11 +11,14 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcec/v2/schnorr"
+	"github.com/btcsuite/btcd/btcec/v2/schnorr/musig2"
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -93,6 +97,9 @@ var (
 	aliceAddr, _ = net.ResolveTCPAddr("tcp", "10.0.0.3:9000")
 
 	defaultMaxLocalCsvDelay uint16 = 10000
+
+	keyLocalMultiSig  = string(input.PsbtKeyTypeOutputLocalMultiSigKey)
+	keyRemoteMultiSig = string(input.PsbtKeyTypeOutputRemoteMultiSigKey)
 )
 
 // assertProperBalance asserts than the total value of the unspent outputs
@@ -1687,6 +1694,12 @@ func txFromOutput(tx *wire.MsgTx, signer input.Signer, fromPubKey,
 		PkScript: payToScript,
 	})
 
+	psbtSigner, ok := signer.(*psbtChecker)
+	if ok {
+		psbtSigner.addAllowedOut(payToScript)
+		defer psbtSigner.clearAllowedOuts()
+	}
+
 	// Now we can populate the sign descriptor which we'll use to generate
 	// the signature.
 	signDesc := &input.SignDescriptor{
@@ -1695,6 +1708,7 @@ func txFromOutput(tx *wire.MsgTx, signer input.Signer, fromPubKey,
 		},
 		WitnessScript: keyScript,
 		Output:        tx.TxOut[outputIndex],
+		OutSignInfo:   []input.SignInfo{{}},
 		HashType:      txscript.SigHashAll,
 		SigHashes:     input.NewTxSigHashesV0Only(tx1),
 		InputIndex:    0, // Has only one input.
@@ -2022,6 +2036,11 @@ func testSignOutputUsingTweaks(r *rpctest.Harness,
 
 	tweakedPub := input.TweakPubKey(pubKey.PubKey, commitPoint)
 
+	psbtSigner, ok := alice.Cfg.Signer.(*psbtChecker)
+	if ok {
+		defer psbtSigner.clearAllowedOuts()
+	}
+
 	// As we'd like to test both single and double tweaks, we'll repeat
 	// the same set up twice. The first will use a regular single tweak,
 	// and the second will use a double tweak.
@@ -2045,6 +2064,10 @@ func testSignOutputUsingTweaks(r *rpctest.Harness,
 		keyScript, err := txscript.PayToAddrScript(keyAddr)
 		if err != nil {
 			t.Fatalf("unable to generate script: %v", err)
+		}
+
+		if ok {
+			psbtSigner.addAllowedOut(keyScript)
 		}
 
 		// With the script fully assembled, instruct the wallet to fund
@@ -2099,6 +2122,7 @@ func testSignOutputUsingTweaks(r *rpctest.Harness,
 			},
 			WitnessScript: keyScript,
 			Output:        newOutput,
+			OutSignInfo:   []input.SignInfo{{}},
 			HashType:      txscript.SigHashAll,
 			SigHashes:     input.NewTxSigHashesV0Only(sweepTx),
 			InputIndex:    0,
@@ -3079,6 +3103,8 @@ func testSingleFunderExternalFundingTx(miner *rpctest.Harness,
 			CoinLeaser:            alice,
 			Signer:                alice.Cfg.Signer,
 			DustLimit:             600,
+			Fingerprint:           alice.Cfg.Fingerprint,
+			NetParams:             alice.Cfg.NetParams,
 			CoinSelectionStrategy: wallet.CoinSelectionLargest,
 		},
 	)
@@ -3111,6 +3137,27 @@ func testSingleFunderExternalFundingTx(miner *rpctest.Harness,
 	if fullIntent, ok := fundingIntent.(*chanfunding.FullIntent); ok {
 		fullIntent.BindKeys(&aliceFundingKey, bobFundingKey.PubKey)
 
+		aliceChannelConfig := &channeldb.ChannelConfig{
+			MultiSigKey:         aliceFundingKey,
+			RevocationBasePoint: aliceFundingKey,
+			PaymentBasePoint:    aliceFundingKey,
+			DelayBasePoint:      aliceFundingKey,
+			HtlcBasePoint:       aliceFundingKey,
+		}
+
+		bobChannelConfig := &channeldb.ChannelConfig{
+			MultiSigKey:         bobFundingKey,
+			RevocationBasePoint: bobFundingKey,
+			PaymentBasePoint:    bobFundingKey,
+			DelayBasePoint:      bobFundingKey,
+			HtlcBasePoint:       bobFundingKey,
+		}
+
+		fullIntent.ConfigurePsbt(
+			aliceChannelConfig, bobChannelConfig,
+			channeldb.SingleFunderTweaklessBit, true,
+		)
+
 		fundingTx, err = fullIntent.CompileFundingTx(nil, nil)
 		if err != nil {
 			t.Fatalf("unable to compile funding tx: %v", err)
@@ -3121,6 +3168,17 @@ func testSingleFunderExternalFundingTx(miner *rpctest.Harness,
 		}
 	} else {
 		t.Fatalf("expected full intent, instead got: %T", fullIntent)
+	}
+
+	// Alice will have to pretend she's never seen the funding TX, even
+	// though she generated it. This way, she will not be checking the
+	// commitment TX outputs, as she doesn't yet know anything about the
+	// channel other than that it's externally funded.
+	aliceChecker, ok := alice.Cfg.Signer.(*psbtChecker)
+	if ok {
+		aliceChecker.chanMtx.Lock()
+		delete(aliceChecker.seenTxs, fundingTx.TxHash())
+		aliceChecker.chanMtx.Unlock()
 	}
 
 	// Now that we have the fully constructed funding transaction, we'll
@@ -3400,11 +3458,15 @@ func runTests(t *testing.T, walletDriver *lnwallet.WalletDriver,
 		if err != nil {
 			t.Fatalf("unable to create btcwallet: %v", err)
 		}
-		aliceSigner = aliceWalletController.(*btcwallet.BtcWallet)
-		aliceKeyRing = keychain.NewBtcWalletKeyRing(
-			aliceWalletController.(*btcwallet.BtcWallet).InternalWallet(),
-			keychain.CoinTypeTestnet,
-		)
+		aliceBtcWallet, ok :=
+			aliceWalletController.(*btcwallet.BtcWallet)
+		if ok {
+			aliceSigner = newPsbtChecker(t, aliceBtcWallet)
+			aliceKeyRing = keychain.NewBtcWalletKeyRing(
+				aliceBtcWallet.InternalWallet(),
+				keychain.CoinTypeTestnet,
+			)
+		}
 
 		bobSeed := sha256.New()
 		bobSeed.Write([]byte(backEnd))
@@ -3431,12 +3493,17 @@ func runTests(t *testing.T, walletDriver *lnwallet.WalletDriver,
 		if err != nil {
 			t.Fatalf("unable to create btcwallet: %v", err)
 		}
-		bobSigner = bobWalletController.(*btcwallet.BtcWallet)
-		bobKeyRing = keychain.NewBtcWalletKeyRing(
-			bobWalletController.(*btcwallet.BtcWallet).InternalWallet(),
-			keychain.CoinTypeTestnet,
-		)
-		bio = bobWalletController.(*btcwallet.BtcWallet)
+		bobBtcWallet, ok :=
+			bobWalletController.(*btcwallet.BtcWallet)
+		if ok {
+			bobSigner = newPsbtChecker(t, bobBtcWallet)
+			bobKeyRing = keychain.NewBtcWalletKeyRing(
+				bobBtcWallet.InternalWallet(),
+				keychain.CoinTypeTestnet,
+			)
+			bio = bobBtcWallet
+		}
+
 	default:
 		t.Fatalf("unknown wallet driver: %v", walletType)
 	}
@@ -3496,3 +3563,431 @@ func runTests(t *testing.T, walletDriver *lnwallet.WalletDriver,
 
 	return true
 }
+
+// psbtChecker encapsulates BtcWallet's methods implementing the Signer
+// interface, and enforces checking the SignDescriptor for appropriate
+// enrichment.
+type psbtChecker struct {
+	wallet *btcwallet.BtcWallet
+
+	t *testing.T
+
+	checker *input.DefaultSignDescriptorChecker
+
+	chanMtx sync.Mutex
+
+	channelCheckers []func(*wire.TxOut, map[string][]byte) error
+
+	seenTxs map[chainhash.Hash]struct{}
+
+	addedChannel bool
+}
+
+func newPsbtChecker(t *testing.T, wallet *btcwallet.BtcWallet) *psbtChecker {
+	c := &psbtChecker{
+		wallet,
+		t,
+		&input.DefaultSignDescriptorChecker{},
+		sync.Mutex{},
+		[]func(*wire.TxOut, map[string][]byte) error{},
+		make(map[chainhash.Hash]struct{}),
+		false,
+	}
+
+	c.checker.OutChecker = c.outChecker
+
+	return c
+}
+
+func (c *psbtChecker) outChecker(out *wire.TxOut,
+	unkMap map[string][]byte) error {
+
+	// Check for funding output.
+	var (
+		remoteKey, localKey *btcec.PublicKey
+		err                 error
+	)
+
+	remoteKeyBytes, hasRemote := unkMap[keyRemoteMultiSig]
+	if hasRemote {
+		remoteKey, err = btcec.ParsePubKey(remoteKeyBytes)
+		if err != nil {
+			return err
+		}
+	}
+
+	localDescBytes, hasLocalDesc := unkMap[keyLocalMultiSig]
+	if hasLocalDesc {
+		intWallet := c.wallet.InternalWallet()
+
+		fingerprint, coin, localDesc, err :=
+			input.KeyDescriptorFromUnknownValue(localDescBytes)
+		if err != nil {
+			return err
+		}
+
+		scope, account, err := intWallet.LookupAccount("default")
+		if err != nil {
+			return err
+		}
+
+		props, err := intWallet.AccountProperties(scope, account)
+		if err != nil {
+			return err
+		}
+
+		if props.MasterKeyFingerprint != fingerprint {
+			return fmt.Errorf("fingerprint doesn't match: "+
+				"expected %d, got %d",
+				props.MasterKeyFingerprint, fingerprint)
+		}
+
+		if coin != netParams.HDCoinType {
+			return fmt.Errorf("coin type doesn't match: "+
+				"expected %d, got %d", netParams.HDCoinType,
+				coin)
+		}
+
+		keyRing := keychain.NewBtcWalletKeyRing(intWallet, coin)
+		derivedDesc, err := keyRing.DeriveKey(localDesc.KeyLocator)
+		if err != nil {
+			return err
+		}
+
+		if localDesc.PubKey != nil &&
+			!localDesc.PubKey.IsEqual(derivedDesc.PubKey) {
+
+			return fmt.Errorf("local descriptor pubkey mismatch: "+
+				"passed %x, derived %x",
+				localDesc.PubKey.SerializeCompressed(),
+				derivedDesc.PubKey.SerializeCompressed())
+		}
+
+		localKey = derivedDesc.PubKey
+	}
+
+	if hasLocalDesc && hasRemote {
+		witness, err := input.GenMultiSigScript(
+			localKey.SerializeCompressed(),
+			remoteKey.SerializeCompressed(),
+		)
+		if err != nil {
+			return err
+		}
+
+		pkScript, err := input.WitnessScriptHash(witness)
+		if err != nil {
+			return err
+		}
+
+		if bytes.Equal(pkScript, out.PkScript) {
+			c.addChannel(unkMap)
+
+			return nil
+		}
+
+		pkScript, _, err = input.GenTaprootFundingScript(
+			localKey, remoteKey, 0, fn.None[chainhash.Hash](),
+		)
+		if err != nil {
+			return err
+		}
+
+		if bytes.Equal(pkScript, out.PkScript) {
+			c.addChannel(unkMap)
+
+			return nil
+		}
+	}
+
+	// Check for change output. A validating remote signer should look
+	// ahead based on known wallet state, but we cheat here and look it
+	// up in our known addresses. We only do this if the output has no
+	// signing metadata.
+	if len(unkMap) == 0 {
+		var addr btcutil.Address
+
+		switch len(out.PkScript) {
+		case 34:
+			addr, err = btcutil.NewAddressTaproot(
+				out.PkScript[2:],
+				c.wallet.InternalWallet().Manager.ChainParams(),
+			)
+		case 22:
+			addr, err = btcutil.NewAddressWitnessPubKeyHash(
+				out.PkScript[2:],
+				c.wallet.InternalWallet().Manager.ChainParams(),
+			)
+		}
+		if err != nil {
+			return err
+		}
+
+		if c.wallet.IsOurAddress(addr) {
+			return nil
+		}
+	}
+
+	// Check all of the known channels for valid commitment outputs.
+	c.chanMtx.Lock()
+	for _, checker := range c.channelCheckers {
+		err = checker(out, unkMap)
+		if err == nil {
+			c.chanMtx.Unlock()
+
+			return nil
+		}
+	}
+	c.chanMtx.Unlock()
+
+	return fmt.Errorf("unknown output: %s\n\tMap: %s", spew.Sdump(out),
+		spew.Sdump(unkMap))
+}
+
+func (c *psbtChecker) addChannel(unkMap map[string][]byte) {
+	keyInitiator := string(input.PsbtKeyTypeOutputInitiator)
+	keyChanType := string(input.PsbtKeyTypeOutputChanType)
+	keyLocalRev := string(input.PsbtKeyTypeOutputLocalRevocationBasePoint)
+	keyLocalPay := string(input.PsbtKeyTypeOutputLocalPaymentBasePoint)
+	keyLocalDelay := string(input.PsbtKeyTypeOutputLocalDelayBasePoint)
+	keyLocalHtlc := string(input.PsbtKeyTypeOutputLocalHtlcBasePoint)
+	keyRemoteRev := string(input.PsbtKeyTypeOutputRemoteRevocationBasePoint)
+	keyRemotePay := string(input.PsbtKeyTypeOutputRemotePaymentBasePoint)
+	keyRemoteDelay := string(input.PsbtKeyTypeOutputRemoteDelayBasePoint)
+	keyRemoteHtlc := string(input.PsbtKeyTypeOutputRemoteHtlcBasePoint)
+
+	initiator := bytes.Equal(unkMap[keyInitiator], []byte{1})
+
+	chanType := channeldb.ChannelType(binary.LittleEndian.Uint64(
+		unkMap[keyChanType],
+	))
+
+	var (
+		local, remote channeldb.ChannelConfig
+		err           error
+	)
+
+	// We avoid doing all but basic error checks here because if something
+	// is wrong, the output checker we create won't correctly validate any
+	// commitment or second-level transaction outputs.
+	_, _, local.MultiSigKey, err = input.KeyDescriptorFromUnknownValue(
+		unkMap[keyLocalMultiSig],
+	)
+	require.NoError(c.t, err)
+
+	_, _, local.RevocationBasePoint, err =
+		input.KeyDescriptorFromUnknownValue(unkMap[keyLocalRev])
+	require.NoError(c.t, err)
+
+	_, _, local.PaymentBasePoint, err = input.KeyDescriptorFromUnknownValue(
+		unkMap[keyLocalPay],
+	)
+	require.NoError(c.t, err)
+
+	_, _, local.DelayBasePoint, err = input.KeyDescriptorFromUnknownValue(
+		unkMap[keyLocalDelay],
+	)
+	require.NoError(c.t, err)
+
+	_, _, local.HtlcBasePoint, err = input.KeyDescriptorFromUnknownValue(
+		unkMap[keyLocalHtlc],
+	)
+	require.NoError(c.t, err)
+
+	remote.MultiSigKey.PubKey, err = btcec.ParsePubKey(
+		unkMap[keyRemoteMultiSig],
+	)
+	require.NoError(c.t, err)
+
+	remote.RevocationBasePoint.PubKey, err = btcec.ParsePubKey(
+		unkMap[keyRemoteRev],
+	)
+	require.NoError(c.t, err)
+
+	remote.PaymentBasePoint.PubKey, err = btcec.ParsePubKey(
+		unkMap[keyRemotePay],
+	)
+	require.NoError(c.t, err)
+
+	remote.DelayBasePoint.PubKey, err = btcec.ParsePubKey(
+		unkMap[keyRemoteDelay],
+	)
+	require.NoError(c.t, err)
+
+	remote.HtlcBasePoint.PubKey, err = btcec.ParsePubKey(
+		unkMap[keyRemoteHtlc],
+	)
+	require.NoError(c.t, err)
+
+	outChecker := lnwallet.GetCommitmentOutChecker(
+		c.t, chanType, initiator, local, remote,
+	)
+
+	c.chanMtx.Lock()
+	if !c.addedChannel {
+		c.channelCheckers = append(c.channelCheckers, outChecker)
+		c.addedChannel = true
+	}
+	c.chanMtx.Unlock()
+}
+
+func (c *psbtChecker) seenTx(tx *wire.MsgTx) {
+	c.chanMtx.Lock()
+	c.seenTxs[tx.TxHash()] = struct{}{}
+	c.addedChannel = false
+	c.chanMtx.Unlock()
+}
+
+// shouldCheckOutputs returns true unless the transaction being checked is a
+// commitment which is funded by the other party (our wallet hasn't signed the
+// funding TX).
+func (c *psbtChecker) shouldCheckOutputs(tx *wire.MsgTx,
+	signDesc *input.SignDescriptor) bool {
+
+	// If we have no outputs, no need to check them.
+	numOuts := len(tx.TxOut)
+	if numOuts == 0 {
+		return false
+	}
+
+	// If the last output has a commit point, we have a commitment TX.
+	// We should definitely check anything that isn't a commitment.
+	lastOut := numOuts - 1
+	if len(signDesc.OutSignInfo[lastOut]) != 3 || !bytes.Equal(
+		signDesc.OutSignInfo[lastOut][0].Key,
+		input.PsbtKeyTypeOutputCommitPoint,
+	) {
+
+		return true
+	}
+
+	// Since this is a commitment, we should only check its outputs if we've
+	// seen its funding TX. Otherwise, we're just signing the refund TX so
+	// the funding peer can get their money back.
+	c.chanMtx.Lock()
+	_, ok := c.seenTxs[tx.TxIn[0].PreviousOutPoint.Hash]
+	c.chanMtx.Unlock()
+
+	return ok
+}
+
+func (c *psbtChecker) SignOutputRaw(tx *wire.MsgTx,
+	signDesc *input.SignDescriptor) (input.Signature, error) {
+
+	if c.shouldCheckOutputs(tx, signDesc) {
+		err := c.checker.CheckSignDescriptor(tx, signDesc)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	c.seenTx(tx)
+
+	return c.wallet.SignOutputRaw(tx, signDesc)
+}
+
+func (c *psbtChecker) ComputeInputScript(tx *wire.MsgTx,
+	signDesc *input.SignDescriptor) (*input.Script, error) {
+
+	if c.shouldCheckOutputs(tx, signDesc) {
+		err := c.checker.CheckSignDescriptor(tx, signDesc)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	c.seenTx(tx)
+
+	return c.wallet.ComputeInputScript(tx, signDesc)
+}
+
+// addAllowedOut adds an explicitly allowed PkScript for when we fudge it in
+// tests. It only works for the MockSigner and does nothing otherwise. It should
+// only be called from the same goroutine where the signer is created.
+func (c *psbtChecker) addAllowedOut(script []byte) {
+	c.checker.AllowedOut = append(c.checker.AllowedOut, script)
+}
+
+// clearAllowedOuts clears the allow-listed output scripts from the checker at
+// the end of a test, allowing it to be reused for another test.
+func (c *psbtChecker) clearAllowedOuts() {
+	c.checker.AllowedOut = [][]byte{}
+}
+
+// TODO(viktor): add actual implematitions for these methods
+// MuSig2CreateSession creates a new MuSig2 signing session using the local key
+// identified by the key locator.
+func (m *psbtChecker) MuSig2CreateSession(version input.MuSig2Version,
+	locator keychain.KeyLocator, pubkey []*btcec.PublicKey,
+	tweak *input.MuSig2Tweaks, pubNonces [][musig2.PubNonceSize]byte,
+	nonces *musig2.Nonces) (*input.MuSig2SessionInfo, error) {
+
+	return nil, nil
+
+	/*args := m.Called(version, locator, pubkey, tweak, pubNonces, nonces)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+
+	return args.Get(0).(*MuSig2SessionInfo), args.Error(1)*/
+}
+
+// MuSig2RegisterNonces registers one or more public nonces of other signing
+// participants for a session identified by its ID.
+func (m *psbtChecker) MuSig2RegisterNonces(versio input.MuSig2SessionID,
+	pubNonces [][musig2.PubNonceSize]byte) (bool, error) {
+
+	return false, nil
+
+	/*args := m.Called(versio, pubNonces)
+	if args.Get(0) == nil {
+		return false, args.Error(1)
+	}
+
+	return args.Bool(0), args.Error(1)*/
+}
+
+// MuSig2Sign creates a partial signature using the local signing key that was
+// specified when the session was created.
+func (m *psbtChecker) MuSig2Sign(sessionID input.MuSig2SessionID,
+	msg [sha256.Size]byte, withSortedKeys bool) (
+	*musig2.PartialSignature, error) {
+
+	return nil, nil
+	/*args := m.Called(sessionID, msg, withSortedKeys)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+
+	return args.Get(0).(*musig2.PartialSignature), args.Error(1)*/
+}
+
+// MuSig2Cleanup removes a session from memory to free up resources.
+func (m *psbtChecker) MuSig2Cleanup(sessionID input.MuSig2SessionID) error {
+	return nil
+	/*
+		args := m.Called(sessionID)
+
+		return args.Error(0)
+	*/
+}
+
+// MuSig2CombineSig combines the given partial signature(s) with the local one,
+// if it already exists.
+func (m *psbtChecker) MuSig2CombineSig(sessionID input.MuSig2SessionID,
+	partialSig []*musig2.PartialSignature) (
+	*schnorr.Signature, bool, error) {
+
+	return nil, false, nil
+
+	/*
+		args := m.Called(sessionID, partialSig)
+		if args.Get(0) == nil {
+			return nil, false, args.Error(2)
+		}
+
+		return args.Get(0).(*schnorr.Signature), args.Bool(1), args.Error(2)
+	*/
+}
+
+var _ input.Signer = (*psbtChecker)(nil)

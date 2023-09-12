@@ -628,11 +628,12 @@ func testSpendValidation(t *testing.T, tweakless bool) {
 	// of 5 blocks before sweeping the output, while bob can spend
 	// immediately with either the revocation key, or his regular key.
 	keyRing := &CommitmentKeyRing{
+		CommitPoint:   commitPoint,
 		ToLocalKey:    aliceDelayKey,
 		RevocationKey: revokePubKey,
 		ToRemoteKey:   bobPayKey,
 	}
-	commitmentTx, err := CreateCommitTx(
+	commitmentTx, signInfo, err := CreateCommitTx(
 		channelType, *fakeFundingTxIn, keyRing, aliceChanCfg,
 		bobChanCfg, channelBalance, channelBalance, 0, true, 0,
 		fn.None[CommitAuxLeaves](),
@@ -671,6 +672,7 @@ func testSpendValidation(t *testing.T, tweakless bool) {
 		},
 		SingleTweak: remoteCommitTweak,
 		SigHashes:   input.NewTxSigHashesV0Only(sweepTx),
+		OutSignInfo: signInfo,
 		Output: &wire.TxOut{
 			Value: int64(channelBalance),
 		},
@@ -930,7 +932,7 @@ func createTestChannelsForVectors(tc *testContext, chanType channeldb.ChannelTyp
 		anchorAmt = 2 * AnchorSize
 	}
 
-	remoteCommitTx, localCommitTx, err := CreateCommitmentTxns(
+	remoteCommitTx, _, localCommitTx, _, err := CreateCommitmentTxns(
 		remoteBalance, localBalance-commitFee,
 		&remoteCfg, &localCfg, remoteCommitPoint,
 		localCommitPoint, *fundingTxIn, chanType, true, 0,
