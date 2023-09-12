@@ -842,6 +842,10 @@ func testCoopClose(t *testing.T, testCase coopCloseTestCase) {
 
 	aliceDeliveryScript := bobsPrivKey[:]
 	bobDeliveryScript := testHdSeed[:]
+	input.AddAllowedOut(aliceChannel.Signer, aliceDeliveryScript)
+	input.AddAllowedOut(aliceChannel.Signer, bobDeliveryScript)
+	input.AddAllowedOut(bobChannel.Signer, aliceDeliveryScript)
+	input.AddAllowedOut(bobChannel.Signer, bobDeliveryScript)
 
 	aliceFeeRate := chainfee.SatPerKWeight(
 		aliceChannel.channelState.LocalCommitment.FeePerKw,
@@ -1176,7 +1180,7 @@ func testForceClose(t *testing.T, testCase *forceCloseTestCase) {
 		},
 	})
 	sweepTx.AddTxOut(&wire.TxOut{
-		PkScript: senderHtlcPkScript,
+		PkScript: htlcResolution.SweepSignDesc.Output.PkScript,
 		Value:    htlcResolution.SweepSignDesc.Output.Value,
 	})
 	htlcResolution.SweepSignDesc.InputIndex = 0
@@ -1267,7 +1271,7 @@ func testForceClose(t *testing.T, testCase *forceCloseTestCase) {
 		PreviousOutPoint: inHtlcResolution.ClaimOutpoint,
 	})
 	sweepTx.AddTxOut(&wire.TxOut{
-		PkScript: receiverHtlcScript,
+		PkScript: inHtlcResolution.SweepSignDesc.Output.PkScript,
 		Value:    inHtlcResolution.SweepSignDesc.Output.Value,
 	})
 	inHtlcResolution.SweepSignDesc.InputIndex = 0
@@ -2326,6 +2330,10 @@ func TestCooperativeCloseDustAdherence(t *testing.T) {
 
 	aliceDeliveryScript := bobsPrivKey[:]
 	bobDeliveryScript := testHdSeed[:]
+	input.AddAllowedOut(aliceChannel.Signer, aliceDeliveryScript)
+	input.AddAllowedOut(aliceChannel.Signer, bobDeliveryScript)
+	input.AddAllowedOut(bobChannel.Signer, aliceDeliveryScript)
+	input.AddAllowedOut(bobChannel.Signer, bobDeliveryScript)
 
 	// We'll start be initializing the limit of both Alice and Bob to 10k
 	// satoshis.
@@ -6377,6 +6385,8 @@ func TestChannelUnilateralClosePendingCommit(t *testing.T) {
 		Value:    aliceSignDesc.Output.Value,
 	})
 	aliceSignDesc.SigHashes = input.NewTxSigHashesV0Only(sweepTx)
+	aliceSignDesc.OutSignInfo = []input.SignInfo{{}}
+	input.AddAllowedOut(aliceChannel.Signer, testHdSeed[:])
 	sweepTx.TxIn[0].Witness, err = input.CommitSpendNoDelay(
 		aliceChannel.Signer, &aliceSignDesc, sweepTx, false,
 	)

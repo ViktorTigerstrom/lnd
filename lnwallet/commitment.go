@@ -431,8 +431,16 @@ func sweepSigHash(chanType channeldb.ChannelType) txscript.SigHashType {
 // argument should correspond to the owner of the commitment transaction which
 // we are generating the to_local script for.
 func SecondLevelHtlcScript(chanType channeldb.ChannelType, initiator bool,
-	revocationKey, delayKey *btcec.PublicKey, csvDelay, leaseExpiry uint32,
+	revocationKey, delayKey, commitPoint *btcec.PublicKey,
+	csvDelay, leaseExpiry uint32,
 	auxLeaf input.AuxTapLeaf) (input.ScriptDescriptor, error) {
+
+	// Create a SignInfo with metadata for the signer.
+	signInfo := input.UnknownOptions(
+		input.CommitPoint(commitPoint),
+		input.CsvDelay(csvDelay),
+		input.LeaseExpiry(leaseExpiry),
+	)
 
 	switch {
 	// For taproot channels, the pkScript is a segwit v1 p2tr output.
@@ -459,6 +467,7 @@ func SecondLevelHtlcScript(chanType channeldb.ChannelType, initiator bool,
 
 		return &WitnessScriptDesc{
 			OutputScript:  pkScript,
+			PsbtSignInfo:  signInfo,
 			WitnessScript: witnessScript,
 		}, nil
 
@@ -477,6 +486,7 @@ func SecondLevelHtlcScript(chanType channeldb.ChannelType, initiator bool,
 
 		return &WitnessScriptDesc{
 			OutputScript:  pkScript,
+			PsbtSignInfo:  signInfo,
 			WitnessScript: witnessScript,
 		}, nil
 	}
@@ -677,6 +687,10 @@ type unsignedCommitmentTx struct {
 	// txn is the final, unsigned commitment transaction for this view.
 	txn *wire.MsgTx
 
+	// signInfo is a slice of slices of *signInfo matching the
+	// outputs of txn, with additional derivation information for each.
+	signInfo []input.SignInfo
+
 	// fee is the total fee of the commitment transaction.
 	fee btcutil.Amount
 
@@ -789,12 +803,15 @@ func (cb *CommitmentBuilder) createUnsignedCommitmentTx(ourBalance,
 	// CreateCommitTx with parameters matching the perspective, to generate
 	// a new commitment transaction with all the latest unsettled/un-timed
 	// out HTLCs.
-	var leaseExpiry uint32
+	var (
+		leaseExpiry uint32
+		signInfo    []input.SignInfo
+	)
 	if cb.chanState.ChanType.HasLeaseExpiration() {
 		leaseExpiry = cb.chanState.ThawHeight
 	}
 	if whoseCommit.IsLocal() {
-		commitTx, err = CreateCommitTx(
+		commitTx, signInfo, err = CreateCommitTx(
 			cb.chanState.ChanType, fundingTxIn(cb.chanState), keyRing,
 			&cb.chanState.LocalChanCfg, &cb.chanState.RemoteChanCfg,
 			ourBalance.ToSatoshis(), theirBalance.ToSatoshis(),
@@ -802,7 +819,7 @@ func (cb *CommitmentBuilder) createUnsignedCommitmentTx(ourBalance,
 			auxResult.AuxLeaves,
 		)
 	} else {
-		commitTx, err = CreateCommitTx(
+		commitTx, signInfo, err = CreateCommitTx(
 			cb.chanState.ChanType, fundingTxIn(cb.chanState), keyRing,
 			&cb.chanState.RemoteChanCfg, &cb.chanState.LocalChanCfg,
 			theirBalance.ToSatoshis(), ourBalance.ToSatoshis(),
@@ -853,7 +870,7 @@ func (cb *CommitmentBuilder) createUnsignedCommitmentTx(ourBalance,
 			},
 		)(outgoingAuxLeaves)
 
-		err := addHTLC(
+		hSignInfo, err := addHTLC(
 			commitTx, whoseCommit, false, htlc, keyRing,
 			cb.chanState.ChanType, auxLeaf,
 		)
@@ -865,6 +882,7 @@ func (cb *CommitmentBuilder) createUnsignedCommitmentTx(ourBalance,
 		// slices, even if we already pre-allocated them.
 		cltvs = append(cltvs, htlc.Timeout)               //nolint
 		htlcIndexes = append(htlcIndexes, htlc.HtlcIndex) //nolint
+		signInfo = append(signInfo, hSignInfo)
 	}
 	for _, htlc := range filteredHTLCView.Updates.Remote {
 		if HtlcIsDust(
@@ -881,7 +899,7 @@ func (cb *CommitmentBuilder) createUnsignedCommitmentTx(ourBalance,
 			},
 		)(incomingAuxLeaves)
 
-		err := addHTLC(
+		hSignInfo, err := addHTLC(
 			commitTx, whoseCommit, true, htlc, keyRing,
 			cb.chanState.ChanType, auxLeaf,
 		)
@@ -893,6 +911,7 @@ func (cb *CommitmentBuilder) createUnsignedCommitmentTx(ourBalance,
 		// slices, even if we already pre-allocated them.
 		cltvs = append(cltvs, htlc.Timeout)               //nolint
 		htlcIndexes = append(htlcIndexes, htlc.HtlcIndex) //nolint
+		signInfo = append(signInfo, hSignInfo)
 	}
 
 	// Set the state hint of the commitment transaction to facilitate
@@ -909,7 +928,7 @@ func (cb *CommitmentBuilder) createUnsignedCommitmentTx(ourBalance,
 	// lets us skip sending the entire transaction over, instead we'll just
 	// send signatures.
 	commitSort := auxResult.CommitSortFunc.UnwrapOr(DefaultCommitSort)
-	err = commitSort(commitTx, cltvs, htlcIndexes)
+	err = commitSort(commitTx, cltvs, htlcIndexes, signInfo)
 	if err != nil {
 		return nil, fmt.Errorf("unable to sort commitment "+
 			"transaction: %w", err)
@@ -937,6 +956,7 @@ func (cb *CommitmentBuilder) createUnsignedCommitmentTx(ourBalance,
 
 	return &unsignedCommitmentTx{
 		txn:          commitTx,
+		signInfo:     signInfo,
 		fee:          commitFee,
 		ourBalance:   ourBalance,
 		theirBalance: theirBalance,
@@ -956,7 +976,8 @@ func CreateCommitTx(chanType channeldb.ChannelType,
 	localChanCfg, remoteChanCfg *channeldb.ChannelConfig,
 	amountToLocal, amountToRemote btcutil.Amount,
 	numHTLCs int64, initiator bool, leaseExpiry uint32,
-	auxLeaves fn.Option[CommitAuxLeaves]) (*wire.MsgTx, error) {
+	auxLeaves fn.Option[CommitAuxLeaves]) (
+	*wire.MsgTx, []input.SignInfo, error) {
 
 	// First, we create the script for the delayed "pay-to-self" output.
 	// This output has 2 main redemption clauses: either we can redeem the
@@ -972,7 +993,7 @@ func CreateCommitTx(chanType channeldb.ChannelType,
 		fn.FlattenOption(localAuxLeaf),
 	)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Next, we create the script paying to the remote.
@@ -984,7 +1005,7 @@ func CreateCommitTx(chanType channeldb.ChannelType,
 		fn.FlattenOption(remoteAuxLeaf),
 	)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Now that both output scripts have been created, we can finally create
@@ -993,6 +1014,11 @@ func CreateCommitTx(chanType channeldb.ChannelType,
 	commitTx := wire.NewMsgTx(2)
 	commitTx.AddTxIn(&fundingOutput)
 
+	// We also create a slice of slices of *signInfo to send derivation
+	// information downstream. Initial size is zero and capacity is 4 for
+	// easy appending of local and remote outputs and anchors.
+	signInfo := make([]input.SignInfo, 0, 4)
+
 	// Avoid creating dust outputs within the commitment transaction.
 	localOutput := amountToLocal >= localChanCfg.DustLimit
 	if localOutput {
@@ -1000,6 +1026,12 @@ func CreateCommitTx(chanType channeldb.ChannelType,
 			PkScript: toLocalScript.PkScript(),
 			Value:    int64(amountToLocal),
 		})
+
+		signInfo = append(signInfo, input.UnknownOptions(
+			input.CommitPoint(keyRing.CommitPoint),
+			input.CsvDelay(uint32(localChanCfg.CsvDelay)),
+			input.LeaseExpiry(leaseExpiry),
+		))
 	}
 
 	remoteOutput := amountToRemote >= localChanCfg.DustLimit
@@ -1008,6 +1040,12 @@ func CreateCommitTx(chanType channeldb.ChannelType,
 			PkScript: toRemoteScript.PkScript(),
 			Value:    int64(amountToRemote),
 		})
+
+		signInfo = append(signInfo, input.UnknownOptions(
+			input.CommitPoint(keyRing.CommitPoint),
+			input.CsvDelay(uint32(localChanCfg.CsvDelay)),
+			input.LeaseExpiry(leaseExpiry),
+		))
 	}
 
 	// If this channel type has anchors, we'll also add those.
@@ -1016,7 +1054,7 @@ func CreateCommitTx(chanType channeldb.ChannelType,
 			chanType, localChanCfg, remoteChanCfg, keyRing,
 		)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		// Add local anchor output only if we have a commitment output
@@ -1026,6 +1064,9 @@ func CreateCommitTx(chanType channeldb.ChannelType,
 				PkScript: localAnchor.PkScript(),
 				Value:    int64(AnchorSize),
 			})
+
+			// Placeholder for the info required by the signer.
+			signInfo = append(signInfo, input.SignInfo{})
 		}
 
 		// Add anchor output to remote only if they have a commitment
@@ -1035,10 +1076,13 @@ func CreateCommitTx(chanType channeldb.ChannelType,
 				PkScript: remoteAnchor.PkScript(),
 				Value:    int64(AnchorSize),
 			})
+
+			// Placeholder for the unknowns.
+			signInfo = append(signInfo, input.SignInfo{})
 		}
 	}
 
-	return commitTx, nil
+	return commitTx, signInfo, nil
 }
 
 // CoopCloseBalance returns the final balances that should be used to create
@@ -1156,7 +1200,6 @@ func genSegwitV0HtlcScript(chanType channeldb.ChannelType,
 		)
 	}
 	if err != nil {
-		return nil, err
 	}
 
 	// Now that we have the redeem scripts, create the P2WSH public key
@@ -1166,9 +1209,17 @@ func genSegwitV0HtlcScript(chanType channeldb.ChannelType,
 		return nil, err
 	}
 
+	// Store the derivation info for the HTLC in its matching POutput.
+	signInfo := input.UnknownOptions(
+		input.CltvExpiry(timeout),
+		input.CommitPoint(keyRing.CommitPoint),
+		input.RHash(rHash[:]),
+	)
+
 	return &WitnessScriptDesc{
 		OutputScript:  htlcP2WSH,
 		WitnessScript: witnessScript,
+		PsbtSignInfo:  signInfo,
 	}, nil
 }
 
@@ -1260,7 +1311,7 @@ func genHtlcScript(chanType channeldb.ChannelType, isIncoming bool,
 func addHTLC(commitTx *wire.MsgTx, whoseCommit lntypes.ChannelParty,
 	isIncoming bool, paymentDesc *paymentDescriptor,
 	keyRing *CommitmentKeyRing, chanType channeldb.ChannelType,
-	auxLeaf input.AuxTapLeaf) error {
+	auxLeaf input.AuxTapLeaf) (input.SignInfo, error) {
 
 	timeout := paymentDesc.Timeout
 	rHash := paymentDesc.RHash
@@ -1270,7 +1321,7 @@ func addHTLC(commitTx *wire.MsgTx, whoseCommit lntypes.ChannelParty,
 		auxLeaf,
 	)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	pkScript := scriptInfo.PkScript()
@@ -1292,7 +1343,7 @@ func addHTLC(commitTx *wire.MsgTx, whoseCommit lntypes.ChannelParty,
 		paymentDesc.theirWitnessScript = scriptInfo.WitnessScriptToSign()
 	}
 
-	return nil
+	return scriptInfo.SignInfo(), nil
 }
 
 // findOutputIndexesFromRemote finds the index of our and their outputs from
