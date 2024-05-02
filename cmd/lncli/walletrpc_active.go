@@ -1472,6 +1472,7 @@ func leaseOutput(ctx *cli.Context) error {
 		ExpirationSeconds: expiry,
 	}
 
+	// Todo: Check here of how to make the outbound connection
 	walletClient, cleanUp := getWalletClient(ctx)
 	defer cleanUp()
 

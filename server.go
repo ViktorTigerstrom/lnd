@@ -294,6 +294,8 @@ type server struct {
 
 	tlsManager *TLSManager
 
+	remoteSignerClient *rpcwallet.RemoteSignerClient
+
 	// featureMgr dispatches feature vectors for various contexts within the
 	// daemon.
 	featureMgr *feature.Manager
@@ -473,7 +475,8 @@ func newServer(cfg *Config, listenAddrs []net.Addr,
 	nodeKeyDesc *keychain.KeyDescriptor,
 	chansToRestore walletunlocker.ChannelsToRecover,
 	chanPredicate chanacceptor.ChannelAcceptor,
-	torController *tor.Controller, tlsManager *TLSManager) (*server,
+	torController *tor.Controller, tlsManager *TLSManager,
+	remoteSignerClient *rpcwallet.RemoteSignerClient) (*server,
 	error) {
 
 	var (
@@ -605,6 +608,8 @@ func newServer(cfg *Config, listenAddrs []net.Addr,
 		customMessageServer: subscribe.NewServer(),
 
 		tlsManager: tlsManager,
+
+		remoteSignerClient: remoteSignerClient,
 
 		featureMgr: featureMgr,
 		quit:       make(chan struct{}),
@@ -1865,6 +1870,12 @@ func (s *server) Start() error {
 			cleanup = cleanup.add(s.livenessMonitor.Stop)
 		}
 
+		if err := s.remoteSignerClient.Start(); err != nil {
+			startErr = err
+			return
+		}
+		cleanup = cleanup.add(s.remoteSignerClient.Stop)
+
 		// Start the notification server. This is used so channel
 		// management goroutines can be notified when a funding
 		// transaction reaches a sufficient number of confirmations, or
@@ -2278,6 +2289,10 @@ func (s *server) Stop() error {
 		if err := s.cc.BestBlockTracker.Stop(); err != nil {
 			srvrLog.Warnf("Unable to stop BestBlockTracker: %v",
 				err)
+		}
+		if err := s.remoteSignerClient.Stop(); err != nil {
+			srvrLog.Warnf("Unable to stop remote signer "+
+				"client: %v", err)
 		}
 		s.chanEventStore.Stop()
 		s.missionControl.StopStoreTicker()
@@ -4714,3 +4729,4 @@ func shouldPeerBootstrap(cfg *Config) bool {
 	// covering the bootstrapping process.
 	return !cfg.NoNetBootstrap && !isDevNetwork
 }
+

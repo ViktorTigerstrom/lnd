@@ -240,6 +240,62 @@ func (s *Server) Stop() error {
 	return nil
 }
 
+// InjectDependencies populates that the sub-server's dependencies ensures that
+// they have been properly set.
+//
+// NOTE: This is part of the lnrpc.SubServer interface.
+func (s *Server) InjectDependencies(
+	configRegistry lnrpc.SubServerConfigDispatcher) error {
+
+	cfg, err := getConfig(configRegistry, true)
+	if err != nil {
+		return err
+	}
+
+	// If the path of the router macaroon wasn't generated, then we'll
+	// assume that it's found at the default network directory.
+	if cfg.RouterMacPath == "" {
+		cfg.RouterMacPath = filepath.Join(
+			cfg.NetworkDir, DefaultRouterMacFilename,
+		)
+	}
+
+	// Now that we know the full path of the router macaroon, we can check
+	// to see if we need to create it or not. If stateless_init is set
+	// then we don't write the macaroons.
+	macFilePath := cfg.RouterMacPath
+	if cfg.MacService != nil && !cfg.MacService.StatelessInit &&
+		!lnrpc.FileExists(macFilePath) {
+
+		log.Infof("Making macaroons for Router RPC Server at: %v",
+			macFilePath)
+
+		// At this point, we know that the router macaroon doesn't yet,
+		// exist, so we need to create it with the help of the main
+		// macaroon service.
+		routerMac, err := cfg.MacService.NewMacaroon(
+			context.Background(), macaroons.DefaultRootKeyID,
+			macaroonOps...,
+		)
+		if err != nil {
+			return err
+		}
+		routerMacBytes, err := routerMac.M().MarshalBinary()
+		if err != nil {
+			return err
+		}
+		err = ioutil.WriteFile(macFilePath, routerMacBytes, 0644)
+		if err != nil {
+			_ = os.Remove(macFilePath)
+			return err
+		}
+	}
+
+	s.cfg = cfg
+
+	return nil
+}
+
 // Name returns a unique string representation of the sub-server. This can be
 // used to identify the sub-server and also de-duplicate them.
 //

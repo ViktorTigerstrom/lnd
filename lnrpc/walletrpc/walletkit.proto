@@ -347,6 +347,91 @@ service WalletKit {
     unlock/release any locked UTXOs in case of an error in this method.
     */
     rpc FinalizePsbt (FinalizePsbtRequest) returns (FinalizePsbtResponse);
+
+    /*
+    SignCoordinatorStreams dispatches a bi-directional streaming RPC in which
+    OpenChannel requests are sent to the client and the client responds with
+    a boolean that tells LND whether or not to accept the channel. This allows
+    node operators to specify their own criteria for accepting inbound channels
+    through a single persistent connection.
+    */
+    rpc SignCoordinatorStreams (stream SignCoordinatorResponse)
+        returns (stream SignCoordinatorRequest);
+}
+
+message SignCoordinatorRequest {
+    /*
+    The unique ID of the original signcoordinator gRPC request. Useful for
+    mapping request to response. For streaming requests, this will be the same
+    ID for all incoming and outgoing middleware intercept messages of the
+    _same_ stream.
+    */
+    uint64 request_id = 1;
+
+    /*
+    TODO: Add text
+    */
+    oneof sign_request_type {
+        // MAYBE
+        bool registration_complete = 2;
+
+        signrpc.SharedKeyRequest shared_key_request = 3;
+
+        signrpc.SignMessageReq sign_message_req = 4;
+
+        signrpc.MuSig2SessionRequest mu_sig2_session_request = 5;
+
+        signrpc.MuSig2RegisterNoncesRequest mu_sig2_register_nonces_request = 6;
+
+        signrpc.MuSig2SignRequest mu_sig2_sign_request = 7;
+
+        signrpc.MuSig2CombineSigRequest mu_sig2_combine_sig_request = 8;
+
+        signrpc.MuSig2CleanupRequest mu_sig2_cleanup_request = 9;
+
+        SignPsbtRequest sign_psbt_request = 10;
+    }
+}
+
+message SignCoordinatorResponse {
+    /*
+    The unique ID of the original signcoordinator gRPC request. Useful for
+    mapping request to response. For streaming requests, this will be the same
+    ID for all incoming and outgoing middleware intercept messages of the
+    _same_ stream.
+    */
+    uint64 request_id = 1;
+
+    /*
+    TODO: ADD TEXT
+    */
+    oneof sign_response_type {
+        bool signer_registration = 2;
+
+        signrpc.SharedKeyResponse shared_key_response = 3;
+
+        signrpc.SignMessageResp sign_message_resp = 4;
+
+        signrpc.MuSig2SessionResponse mu_sig2_session_response = 5;
+
+        signrpc.MuSig2RegisterNoncesResponse mu_sig2_register_nonces_response =
+            6;
+
+        signrpc.MuSig2SignResponse mu_sig2_sign_response = 7;
+
+        signrpc.MuSig2CombineSigResponse mu_sig2_combine_sig_response = 8;
+
+        signrpc.MuSig2CleanupResponse mu_sig2_cleanup_response = 9;
+
+        SignPsbtResponse sign_psbt_response = 10;
+
+        SignerError signer_error = 11;
+    }
+}
+
+message SignerError {
+    // Details an error which occurred on remote signer.
+    string error = 1;
 }
 
 message ListUnspentRequest {

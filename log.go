@@ -36,6 +36,7 @@ import (
 	"github.com/lightningnetwork/lnd/lnwallet/chancloser"
 	"github.com/lightningnetwork/lnd/lnwallet/chanfunding"
 	"github.com/lightningnetwork/lnd/lnwallet/rpcwallet"
+	"github.com/lightningnetwork/lnd/lnwallet/signcoordinator"
 	"github.com/lightningnetwork/lnd/monitoring"
 	"github.com/lightningnetwork/lnd/netann"
 	"github.com/lightningnetwork/lnd/peer"
@@ -178,6 +179,7 @@ func SetupLoggers(root *build.RotatingLogWriter, interceptor signal.Interceptor)
 	AddSubLogger(root, tor.Subsystem, interceptor, tor.UseLogger)
 	AddSubLogger(root, btcwallet.Subsystem, interceptor, btcwallet.UseLogger)
 	AddSubLogger(root, rpcwallet.Subsystem, interceptor, rpcwallet.UseLogger)
+	AddSubLogger(root, signcoordinator.Subsystem, interceptor, signcoordinator.UseLogger)
 	AddSubLogger(root, peersrpc.Subsystem, interceptor, peersrpc.UseLogger)
 }
 

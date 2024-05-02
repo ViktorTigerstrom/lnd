@@ -32,6 +32,10 @@ type SubServer interface {
 	// Name returns a unique string representation of the sub-server. This
 	// can be used to identify the sub-server and also de-duplicate them.
 	Name() string
+
+	// InjectDependencies populates the sub-server's dependencies using the
+	// passed SubServerConfigDispatcher.
+	InjectDependencies(subCfgs SubServerConfigDispatcher) error
 }
 
 // GrpcHandler is the interface that should be registered with the root gRPC
@@ -149,3 +153,5 @@ func SupportedServers() []string {
 
 	return supportedSubServers
 }
+
+

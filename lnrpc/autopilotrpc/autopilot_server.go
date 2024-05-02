@@ -104,7 +104,10 @@ func (s *Server) Start() error {
 		return nil
 	}
 
-	return s.manager.Start()
+	// The autopilot manager cannot be started until we have the
+	// dependencies injected. Therefore we do not start the manager here,
+	// but instead do that once the dependencies have been injected.
+	return nil
 }
 
 // Stop signals any active goroutines for a graceful closure.
@@ -112,6 +115,11 @@ func (s *Server) Start() error {
 // NOTE: This is part of the lnrpc.SubServer interface.
 func (s *Server) Stop() error {
 	if atomic.AddInt32(&s.shutdown, 1) != 1 {
+		return nil
+	}
+
+	// TODO: add MUTEXES!
+	if s.manager == nil {
 		return nil
 	}
 
@@ -124,6 +132,24 @@ func (s *Server) Stop() error {
 // NOTE: This is part of the lnrpc.SubServer interface.
 func (s *Server) Name() string {
 	return subServerName
+}
+
+// InjectDependencies populates that the sub-server's dependencies ensures that
+// they have been properly set.
+//
+// NOTE: This is part of the lnrpc.SubServer interface.
+func (s *Server) InjectDependencies(
+	configRegistry lnrpc.SubServerConfigDispatcher) error {
+
+	cfg, err := getConfig(configRegistry, true)
+	if err != nil {
+		return err
+	}
+
+	s.cfg = cfg
+	s.manager = cfg.Manager
+
+	return s.manager.Start()
 }
 
 // RegisterWithRootServer will be called by the root gRPC server to direct a

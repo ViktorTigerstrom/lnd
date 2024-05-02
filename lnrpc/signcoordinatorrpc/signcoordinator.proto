@@ -1,0 +1,447 @@
+syntax = "proto3";
+
+package signcoordinatorrpc;
+
+option go_package = "github.com/lightningnetwork/lnd/lnrpc/signcoordinatorrpc";
+
+// SignCoordinator holds the rpc for signing stream
+service SignCoordinator {
+    /*
+    SignCoordinatorStreams dispatches a bi-directional streaming RPC in which
+    OpenChannel requests are sent to the client and the client responds with
+    a boolean that tells LND whether or not to accept the channel. This allows
+    node operators to specify their own criteria for accepting inbound channels
+    through a single persistent connection.
+    */
+    rpc SignCoordinatorStreams (stream SignCoordinatorRequest)
+        returns (stream SignCoordinatorResponse);
+}
+
+message SignCoordinatorRequest {
+    /*
+    The unique ID of the original signcoordinator gRPC request. Useful for
+    mapping request to response. For streaming requests, this will be the same
+    ID for all incoming and outgoing middleware intercept messages of the
+    _same_ stream.
+    */
+    uint64 request_id = 1;
+
+    /*
+    TODO: Add text
+    */
+    oneof sign_request_type {
+        bool connectedRequest = 2;
+
+        DeriveSharedKeyRequest deriveSharedKeyRequest = 3;
+
+        SignMessageRequest signMessageRequest = 4;
+
+        MuSig2CreateSessionRequest muSig2CreateSessionRequest = 5;
+
+        MuSig2RegisterNoncesRequest muSig2RegisterNoncesRequest = 6;
+
+        MuSig2SignRequest muSig2SignRequest = 7;
+
+        MuSig2CombineSigRequest muSig2CombineSigRequest = 8;
+
+        MuSig2CleanupRequest muSig2CleanupRequest = 9;
+
+        SignPsbtRequest signPsbtRequest = 10;
+    }
+
+    /*
+    TODO: REMOVE?
+    */
+    uint64 msg_id = 11;
+}
+
+message SignCoordinatorResponse {
+    /*
+    The unique ID of the original signcoordinator gRPC request. Useful for
+    mapping request to response. For streaming requests, this will be the same
+    ID for all incoming and outgoing middleware intercept messages of the
+    _same_ stream.
+    */
+    uint64 request_id = 1;
+
+    /*
+    TODO: ADD TEXT
+    */
+    oneof sign_response_type {
+        bool connectedResponse = 2;
+
+        DeriveSharedKeyResponse deriveSharedKeyResponse = 3;
+
+        SignMessageResponse signMessageResponse = 4;
+
+        MuSig2CreateSessionResponse muSig2CreateSessionResponse = 5;
+
+        MuSig2RegisterNoncesResponse muSig2RegisterNoncesResponse = 6;
+
+        MuSig2SignResponse muSig2SignResponse = 7;
+
+        MuSig2CombineSigResponse muSig2CombineSigResponse = 8;
+
+        MuSig2CleanupResponse muSig2CleanupResponse = 9;
+
+        SignPsbtResponse signPsbtResponse = 10;
+    }
+
+    /*
+    TODO: REMOVE?
+    */
+    uint64 msg_id = 11;
+}
+
+// SharedKeyRequest
+message DeriveSharedKeyRequest {
+    // The ephemeral public key to use for the DH key derivation.
+    bytes ephemeral_pubkey = 1;
+
+    /*
+    Deprecated. The optional key locator of the local key that should be used.
+    If this parameter is not set then the node's identity private key will be
+    used.
+    */
+    KeyLocator key_loc = 2 [deprecated = true];
+
+    /*
+    A key descriptor describes the key used for performing ECDH. Either a key
+    locator or a raw public key is expected, if neither is supplied, defaults to
+    the node's identity private key.
+    */
+    KeyDescriptor key_desc = 3;
+}
+
+// SharedKeyResponse
+message DeriveSharedKeyResponse {
+    // The shared public key, hashed with sha256.
+    bytes shared_key = 1;
+}
+
+// SignMessageReq
+message SignMessageRequest {
+    /*
+    The message to be signed. When using REST, this field must be encoded as
+    base64.
+    */
+    bytes msg = 1;
+
+    // The key locator that identifies which key to use for signing.
+    KeyLocator key_loc = 2;
+
+    // Double-SHA256 hash instead of just the default single round.
+    bool double_hash = 3;
+
+    /*
+    Use the compact (pubkey recoverable) format instead of the raw lnwire
+    format. This option cannot be used with Schnorr signatures.
+    */
+    bool compact_sig = 4;
+
+    /*
+    Use Schnorr signature. This option cannot be used with compact format.
+    */
+    bool schnorr_sig = 5;
+
+    /*
+    The optional Taproot tweak bytes to apply to the private key before creating
+    a Schnorr signature. The private key is tweaked as described in BIP-341:
+    privKey + h_tapTweak(internalKey || tapTweak)
+    */
+    bytes schnorr_sig_tap_tweak = 6;
+
+    /*
+    An optional tag that can be provided when taking a tagged hash of a
+    message. This option can only be used when schnorr_sig is true.
+    */
+    bytes tag = 7;
+}
+
+// SignMessageResp
+message SignMessageResponse {
+    /*
+    The signature for the given message in the fixed-size LN wire format.
+    */
+    bytes signature = 1;
+}
+
+// MuSig2SessionRequest
+message MuSig2CreateSessionRequest {
+    /*
+    The key locator that identifies which key to use for signing.
+    */
+    KeyLocator key_loc = 1;
+
+    /*
+    A list of all public keys (serialized in 32-byte x-only format for v0.4.0
+    and 33-byte compressed format for v1.0.0rc2!) participating in the signing
+    session. The list will always be sorted lexicographically internally. This
+    must include the local key which is described by the above key_loc.
+    */
+    repeated bytes all_signer_pubkeys = 2;
+
+    /*
+    An optional list of all public nonces of other signing participants that
+    might already be known.
+    */
+    repeated bytes other_signer_public_nonces = 3;
+
+    /*
+    A series of optional generic tweaks to be applied to the the aggregated
+    public key.
+    */
+    repeated TweakDesc tweaks = 4;
+
+    /*
+    An optional taproot specific tweak that must be specified if the MuSig2
+    combined key will be used as the main taproot key of a taproot output
+    on-chain.
+    */
+    TaprootTweakDesc taproot_tweak = 5;
+
+    /*
+    The mandatory version of the MuSig2 BIP draft to use. This is necessary to
+    differentiate between the changes that were made to the BIP while this
+    experimental RPC was already released. Some of those changes affect how the
+    combined key and nonces are created.
+    */
+    MuSig2Version version = 6;
+
+    /*
+    A set of pre generated secret local nonces to use in the musig2 session.
+    This field is optional. This can be useful for protocols that need to send
+    nonces ahead of time before the set of signer keys are known. This value
+    MUST be 97 bytes and be the concatenation of two CSPRNG generated 32 byte
+    values and local public key used for signing as specified in the key_loc
+    field.
+    */
+    bytes pregenerated_local_nonce = 7;
+}
+
+// MuSig2SessionResponse
+message MuSig2CreateSessionResponse {
+    /*
+    The unique ID that represents this signing session. A session can be used
+    for producing a signature a single time. If the signing fails for any
+    reason, a new session with the same participants needs to be created.
+    */
+    bytes session_id = 1;
+
+    /*
+    The combined public key (in the 32-byte x-only format) with all tweaks
+    applied to it. If a taproot tweak is specified, this corresponds to the
+    taproot key that can be put into the on-chain output.
+    */
+    bytes combined_key = 2;
+
+    /*
+    The raw combined public key (in the 32-byte x-only format) before any tweaks
+    are applied to it. If a taproot tweak is specified, this corresponds to the
+    internal key that needs to be put into the witness if the script spend path
+    is used.
+    */
+    bytes taproot_internal_key = 3;
+
+    /*
+    The two public nonces the local signer uses, combined into a single value
+    of 66 bytes. Can be split into the two 33-byte points to get the individual
+    nonces.
+    */
+    bytes local_public_nonces = 4;
+
+    /*
+    Indicates whether all nonces required to start the signing process are known
+    now.
+    */
+    bool have_all_nonces = 5;
+
+    /*
+    The version of the MuSig2 BIP that was used to create the session.
+    */
+    MuSig2Version version = 6;
+}
+
+// MuSig2RegisterNoncesRequest
+message MuSig2RegisterNoncesRequest {
+    /*
+    The unique ID of the signing session those nonces should be registered with.
+    */
+    bytes session_id = 1;
+
+    /*
+    A list of all public nonces of other signing participants that should be
+    registered.
+    */
+    repeated bytes other_signer_public_nonces = 3;
+}
+
+// MuSig2RegisterNoncesResponse
+message MuSig2RegisterNoncesResponse {
+    /*
+    Indicates whether all nonces required to start the signing process are known
+    now.
+    */
+    bool have_all_nonces = 1;
+}
+
+// MuSig2SignRequest
+message MuSig2SignRequest {
+    /*
+    The unique ID of the signing session to use for signing.
+    */
+    bytes session_id = 1;
+
+    /*
+    The 32-byte SHA256 digest of the message to sign.
+    */
+    bytes message_digest = 2;
+
+    /*
+    Cleanup indicates that after signing, the session state can be cleaned up,
+    since another participant is going to be responsible for combining the
+    partial signatures.
+    */
+    bool cleanup = 3;
+}
+
+// MuSig2SignResponse
+message MuSig2SignResponse {
+    /*
+    The partial signature created by the local signer.
+    */
+    bytes local_partial_signature = 1;
+}
+
+// MuSig2CombineSigRequest
+message MuSig2CombineSigRequest {
+    /*
+    The unique ID of the signing session to combine the signatures for.
+    */
+    bytes session_id = 1;
+
+    /*
+    The list of all other participants' partial signatures to add to the current
+    session.
+    */
+    repeated bytes other_partial_signatures = 2;
+}
+
+// MuSig2CombineSigResponse
+message MuSig2CombineSigResponse {
+    /*
+    Indicates whether all partial signatures required to create a final, full
+    signature are known yet. If this is true, then the final_signature field is
+    set, otherwise it is empty.
+    */
+    bool have_all_signatures = 1;
+
+    /*
+    The final, full signature that is valid for the combined public key.
+    */
+    bytes final_signature = 2;
+}
+
+// MuSig2CleanupRequest
+message MuSig2CleanupRequest {
+    /*
+    The unique ID of the signing session that should be removed/cleaned up.
+    */
+    bytes session_id = 1;
+}
+
+// MuSig2CleanupResponse
+message MuSig2CleanupResponse {
+}
+
+// Walletkit SignPsbtRequest
+message SignPsbtRequest {
+    /*
+    The PSBT that should be signed. The PSBT must contain all required inputs,
+    outputs, UTXO data and custom fields required to identify the signing key.
+    */
+    bytes funded_psbt = 1;
+}
+
+// Walletkit SignPsbtResponse
+message SignPsbtResponse {
+    // The signed transaction in PSBT format.
+    bytes signed_psbt = 1;
+
+    // The indices of signed inputs.
+    repeated uint32 signed_inputs = 2;
+}
+
+message KeyLocator {
+    // The family of key being identified.
+    int32 key_family = 1;
+
+    // The precise index of the key being identified.
+    int32 key_index = 2;
+}
+
+message KeyDescriptor {
+    /*
+    The raw bytes of the key being identified.
+    */
+    bytes raw_key_bytes = 1;
+
+    /*
+    The key locator that identifies which key to use for signing.
+    */
+    KeyLocator key_loc = 2;
+}
+
+message TweakDesc {
+    /*
+    Tweak is the 32-byte value that will modify the public key.
+    */
+    bytes tweak = 1;
+
+    /*
+    Specifies if the target key should be converted to an x-only public key
+    before tweaking. If true, then the public key will be mapped to an x-only
+    key before the tweaking operation is applied.
+    */
+    bool is_x_only = 2;
+}
+
+message TaprootTweakDesc {
+    /*
+    The root hash of the tapscript tree if a script path is committed to. If
+    the MuSig2 key put on chain doesn't also commit to a script path (BIP-0086
+    key spend only), then this needs to be empty and the key_spend_only field
+    below must be set to true. This is required because gRPC cannot
+    differentiate between a zero-size byte slice and a nil byte slice (both
+    would be serialized the same way). So the extra boolean is required.
+    */
+    bytes script_root = 1;
+
+    /*
+    Indicates that the above script_root is expected to be empty because this
+    is a BIP-0086 key spend only commitment where only the internal key is
+    committed to instead of also including a script root hash.
+    */
+    bool key_spend_only = 2;
+}
+
+enum MuSig2Version {
+    /*
+    The default value on the RPC is zero for enums so we need to represent an
+    invalid/undefined version by default to make sure clients upgrade their
+    software to set the version explicitly.
+    */
+    MUSIG2_VERSION_UNDEFINED = 0;
+
+    /*
+    The version of MuSig2 that lnd 0.15.x shipped with, which corresponds to the
+    version v0.4.0 of the MuSig2 BIP draft.
+    */
+    MUSIG2_VERSION_V040 = 1;
+
+    /*
+    The current version of MuSig2 which corresponds to the version v1.0.0rc2 of
+    the MuSig2 BIP draft.
+    */
+    MUSIG2_VERSION_V100RC2 = 2;
+}

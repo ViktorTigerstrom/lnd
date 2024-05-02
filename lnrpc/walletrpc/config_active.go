@@ -7,6 +7,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcwallet/wallet"
 	"github.com/lightningnetwork/lnd/keychain"
+	"github.com/lightningnetwork/lnd/lncfg"
 	"github.com/lightningnetwork/lnd/lnwallet"
 	"github.com/lightningnetwork/lnd/lnwallet/chainfee"
 	"github.com/lightningnetwork/lnd/macaroons"
@@ -76,4 +77,11 @@ type Config struct {
 	// CoinSelectionStrategy is the strategy that is used for selecting
 	// coins when funding a transaction.
 	CoinSelectionStrategy wallet.CoinSelectionStrategy
+
+	// RemoteSignerConfig is the configuration for the RemoteSigner.
+	RemoteSignerConfig *lncfg.RemoteSigner
+
+	// Todo: Add the actual remote signer here, that only get's set if there was an actual remote signer set.
+	// This must be of the RemoteSigner interface that we've defined within the walletrpc package.
+	RemoteSigner RemoteSigner
 }
