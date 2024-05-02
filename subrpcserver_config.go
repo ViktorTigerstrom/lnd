@@ -24,6 +24,7 @@ import (
 	"github.com/lightningnetwork/lnd/lnrpc/walletrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/watchtowerrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/wtclientrpc"
+	"github.com/lightningnetwork/lnd/lnwallet/rpcwallet"
 	"github.com/lightningnetwork/lnd/lnwire"
 	"github.com/lightningnetwork/lnd/macaroons"
 	"github.com/lightningnetwork/lnd/netann"
@@ -202,6 +203,9 @@ func (s *subRPCServerConfigs) PopulateDependencies(cfg *Config,
 					cc.Wallet.Cfg.CoinSelectionStrategy,
 				),
 			)
+			// The "RemoteSignerConfig" and the "RemoteSigner"
+			// fields have already been added into the config prior,
+			// and we therefore don't need to overwrite them here.
 
 		case *autopilotrpc.Config:
 			subCfgValue := extractReflectValue(subCfg)
@@ -343,6 +347,92 @@ func (s *subRPCServerConfigs) PopulateDependencies(cfg *Config,
 	s.RouterRPC.MacService = macService
 	s.RouterRPC.Router = chanRouter
 	s.RouterRPC.RouterBackend = routerBackend
+
+	return nil
+}
+
+func (s *subRPCServerConfigs) PopulateRemoteSignerCfgValues(cfg *Config,
+	cc *chainreg.ChainControl, networkDir string,
+	macService *macaroons.Service, activeNetParams *chaincfg.Params) error {
+
+	s.WalletKitRPC.RemoteSignerConfig = cfg.RemoteSigner
+
+	kRing, ok := cc.Wallet.WalletController.(*rpcwallet.RPCKeyRing)
+	if ok {
+		s.WalletKitRPC.RemoteSigner = kRing.RemoteSigner()
+	}
+
+	/*
+		// First, we'll use reflect to obtain a version of the config struct
+		// that allows us to programmatically inspect its fields.
+		selfVal := extractReflectValue(s)
+		selfType := selfVal.Type()
+
+		numFields := selfVal.NumField()
+		for i := 0; i < numFields; i++ {
+			field := selfVal.Field(i)
+			fieldElem := field.Elem()
+			fieldName := selfType.Field(i).Name
+
+			ltndLog.Debugf("Populating dependencies for sub RPC "+
+				"server: %v", fieldName)
+
+			// If this sub-config doesn't actually have any fields, then we
+			// can skip it, as the build tag for it is likely off.
+			if fieldElem.NumField() == 0 {
+				continue
+			}
+			if !fieldElem.CanSet() {
+				continue
+			}
+
+			if subCfg, ok := field.Interface().(*walletrpc.Config); ok {
+				subCfgValue := extractReflectValue(subCfg)
+
+				/*subCfgValue.FieldByName("NetworkDir").Set(
+					reflect.ValueOf(networkDir),
+				)
+				subCfgValue.FieldByName("MacService").Set(
+					reflect.ValueOf(macService),
+				)
+				subCfgValue.FieldByName("FeeEstimator").Set(
+					reflect.ValueOf(cc.FeeEstimator),
+				)
+				subCfgValue.FieldByName("Wallet").Set(
+					reflect.ValueOf(cc.Wallet),
+				)
+				subCfgValue.FieldByName("CoinSelectionLocker").Set(
+					reflect.ValueOf(cc.Wallet),
+				)
+				subCfgValue.FieldByName("KeyRing").Set(
+					reflect.ValueOf(cc.KeyRing),
+				)
+				subCfgValue.FieldByName("Chain").Set(
+					reflect.ValueOf(cc.ChainIO),
+				)
+				subCfgValue.FieldByName("ChainParams").Set(
+					reflect.ValueOf(activeNetParams),
+				)
+				subCfgValue.FieldByName("CurrentNumAnchorChans").Set(
+					reflect.ValueOf(cc.Wallet.CurrentNumAnchorChans),
+				)
+				subCfgValue.FieldByName("CoinSelectionStrategy").Set(
+					reflect.ValueOf(
+						cc.Wallet.Cfg.CoinSelectionStrategy,
+					),
+				)*/
+	/*subCfgValue.FieldByName("RemoteSignerConfig").Set(
+				reflect.ValueOf(cfg.RemoteSigner),
+			)
+
+			kRing, ok := cc.Wallet.WalletController.(*rpcwallet.RPCKeyRing)
+			if ok {
+				subCfgValue.FieldByName("RemoteSigner").Set(
+					reflect.ValueOf(kRing.RemoteSigner()),
+				)
+			}
+		}
+	}*/
 
 	return nil
 }

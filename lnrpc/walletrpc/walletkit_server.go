@@ -34,6 +34,7 @@ import (
 	"github.com/lightningnetwork/lnd/input"
 	"github.com/lightningnetwork/lnd/keychain"
 	"github.com/lightningnetwork/lnd/labels"
+	"github.com/lightningnetwork/lnd/lncfg"
 	"github.com/lightningnetwork/lnd/lnrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/signrpc"
 	"github.com/lightningnetwork/lnd/lnwallet"
@@ -178,6 +179,10 @@ var (
 			Entity: "onchain",
 			Action: "write",
 		}},
+		"/walletrpc.WalletKit/SignCoordinatorStreams": {{
+			Entity: "onchain",
+			Action: "write",
+		}},
 	}
 
 	// DefaultWalletKitMacFilename is the default name of the wallet kit
@@ -248,6 +253,8 @@ type WalletKit struct {
 	UnimplementedWalletKitServer
 
 	cfg *Config
+
+	quit chan struct{}
 }
 
 // A compile time check to ensure that WalletKit fully implements the
@@ -296,7 +303,8 @@ func New(cfg *Config) (*WalletKit, lnrpc.MacaroonPerms, error) {
 	}
 
 	walletKit := &WalletKit{
-		cfg: cfg,
+		cfg:  cfg,
+		quit: make(chan struct{}),
 	}
 
 	return walletKit, macPermissions, nil
@@ -313,6 +321,64 @@ func (w *WalletKit) Start() error {
 //
 // NOTE: This is part of the lnrpc.SubServer interface.
 func (w *WalletKit) Stop() error {
+	close(w.quit)
+
+	return nil
+}
+
+// InjectDependencies populates that the sub-server's dependencies ensures that
+// they have been properly set.
+//
+// NOTE: This is part of the lnrpc.SubServer interface.
+func (w *WalletKit) InjectDependencies(
+	configRegistry lnrpc.SubServerConfigDispatcher) error {
+
+	cfg, err := getConfig(configRegistry, true)
+	if err != nil {
+		return err
+	}
+
+	// If the path of the wallet kit macaroon wasn't specified, then we'll
+	// assume that it's found at the default network directory.
+	if cfg.WalletKitMacPath == "" {
+		cfg.WalletKitMacPath = filepath.Join(
+			cfg.NetworkDir, DefaultWalletKitMacFilename,
+		)
+	}
+
+	// Now that we know the full path of the wallet kit macaroon, we can
+	// check to see if we need to create it or not. If stateless_init is set
+	// then we don't write the macaroons.
+	macFilePath := cfg.WalletKitMacPath
+	if cfg.MacService != nil && !cfg.MacService.StatelessInit &&
+		!lnrpc.FileExists(macFilePath) {
+
+		log.Infof("Baking macaroons for WalletKit RPC Server at: %v",
+			macFilePath)
+
+		// At this point, we know that the wallet kit macaroon doesn't
+		// yet, exist, so we need to create it with the help of the
+		// main macaroon service.
+		walletKitMac, err := cfg.MacService.NewMacaroon(
+			context.Background(), macaroons.DefaultRootKeyID,
+			macaroonOps...,
+		)
+		if err != nil {
+			return err
+		}
+		walletKitMacBytes, err := walletKitMac.M().MarshalBinary()
+		if err != nil {
+			return err
+		}
+		err = os.WriteFile(macFilePath, walletKitMacBytes, 0644)
+		if err != nil {
+			_ = os.Remove(macFilePath)
+			return err
+		}
+	}
+
+	w.cfg = cfg
+
 	return nil
 }
 
@@ -444,6 +510,39 @@ func (w *WalletKit) ListUnspent(ctx context.Context,
 	return &ListUnspentResponse{
 		Utxos: rpcUtxos,
 	}, nil
+}
+
+type RemoteSigner interface {
+	// RemoteSigner extends the signrpc.SignerClient
+	signrpc.SignerClient
+
+	// RemoteSigner extends the walletrpc.WalletKitClient
+	WalletKitClient
+
+	// Timeout returns the set timeout used for the remote signer.
+	Timeout() time.Duration
+
+	Ready() error
+
+	Run(stream WalletKit_SignCoordinatorStreamsServer) error
+}
+
+// This get's triggered when a client connects. Can get triggered multiple
+// times.
+func (w *WalletKit) SignCoordinatorStreams(
+	stream WalletKit_SignCoordinatorStreamsServer) error {
+
+	// Check that the user actually has configured that the reverse remote
+	// signer functionality should be enabled.
+	if !w.cfg.RemoteSignerConfig.Enable || w.cfg.RemoteSignerConfig.SignerType != lncfg.ReverseRemoteSignerType {
+		return fmt.Errorf("Reverse remote signer not enabled in config")
+	}
+
+	if w.cfg.RemoteSigner == nil {
+		return fmt.Errorf("remote signer not set in config")
+	}
+
+	return w.cfg.RemoteSigner.Run(stream)
 }
 
 // LeaseOutput locks an output to the given ID, preventing it from being

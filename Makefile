@@ -107,6 +107,11 @@ build:
 	$(GOBUILD) -tags="$(DEV_TAGS)" -o lnd-debug $(DEV_GCFLAGS) $(DEV_LDFLAGS) $(PKG)/cmd/lnd
 	$(GOBUILD) -tags="$(DEV_TAGS)" -o lncli-debug $(DEV_GCFLAGS) $(DEV_LDFLAGS) $(PKG)/cmd/lncli
 
+build-test:
+	@$(call print, "Building debug lnd and lncli.")
+	$(GOBUILD) -tags="$(RELEASE_TAGS)" -o lnd-debug $(DEV_GCFLAGS) $(DEV_LDFLAGS) $(PKG)/cmd/lnd
+	$(GOBUILD) -tags="$(RELEASE_TAGS)" -o lncli-debug $(DEV_GCFLAGS) $(DEV_LDFLAGS) $(PKG)/cmd/lncli
+
 #? build-itest: Build integration test binaries, place them in itest directory
 build-itest:
 	@$(call print, "Building itest btcd and lnd.")

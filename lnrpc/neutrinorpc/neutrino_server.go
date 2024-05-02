@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	sync "sync"
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -84,6 +85,8 @@ type Server struct {
 	UnimplementedNeutrinoKitServer
 
 	cfg *Config
+
+	mu sync.Mutex
 }
 
 // A compile time check to ensure that NeutrinoKit fully implements the
@@ -116,6 +119,26 @@ func (s *Server) Start() error {
 //
 // NOTE: This is part of the lnrpc.SubServer interface.
 func (s *Server) Stop() error {
+	return nil
+}
+
+// InjectDependencies populates that the sub-server's dependencies ensures that
+// they have been properly set.
+//
+// NOTE: This is part of the lnrpc.SubServer interface.
+func (s *Server) InjectDependencies(
+	configRegistry lnrpc.SubServerConfigDispatcher) error {
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	config, err := getConfig(configRegistry, true)
+	if err != nil {
+		return err
+	}
+
+	s.cfg = config
+
 	return nil
 }
 
@@ -441,3 +464,10 @@ func (s *Server) GetBlockHash(ctx context.Context,
 
 	return &GetBlockHashResponse{Hash: hash.String()}, nil
 }
+
+
+
+
+
+
+

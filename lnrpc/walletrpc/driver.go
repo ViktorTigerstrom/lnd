@@ -16,55 +16,75 @@ import (
 func createNewSubServer(configRegistry lnrpc.SubServerConfigDispatcher) (
 	*WalletKit, lnrpc.MacaroonPerms, error) {
 
+	config, err := getConfig(configRegistry, false)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return New(config)
+}
+
+func getConfig(configRegistry lnrpc.SubServerConfigDispatcher,
+	enforceDependencies bool) (*Config, error) {
 	// We'll attempt to look up the config that we expect, according to our
 	// SubServerName name. If we can't find this, then we'll exit with an
 	// error, as we're unable to properly initialize ourselves without this
 	// config.
-	walletKitServerConf, ok := configRegistry.FetchConfig(SubServerName)
+	subServerConf, ok := configRegistry.FetchConfig(SubServerName)
 	if !ok {
-		return nil, nil, fmt.Errorf("unable to find config for "+
-			"subserver type %s", SubServerName)
+		return nil, fmt.Errorf("unable to find config for subserver "+
+			"type %s", SubServerName)
 	}
 
 	// Now that we've found an object mapping to our service name, we'll
 	// ensure that it's the type we need.
-	config, ok := walletKitServerConf.(*Config)
+	config, ok := subServerConf.(*Config)
 	if !ok {
-		return nil, nil, fmt.Errorf("wrong type of config for "+
-			"subserver %s, expected %T got %T", SubServerName,
-			&Config{}, walletKitServerConf)
+		return nil, fmt.Errorf("wrong type of config for subserver "+
+			"%s, expected %T got %T", SubServerName, &Config{},
+			subServerConf)
 	}
 
+	if enforceDependencies {
+		if err := verifyDependencies(config); err != nil {
+			return nil, err
+		}
+	}
+
+	return config, nil
+}
+
+func verifyDependencies(config *Config) error {
 	// Before we try to make the new WalletKit service instance, we'll
 	// perform some sanity checks on the arguments to ensure that they're
 	// usable.
 	switch {
 	case config.MacService != nil && config.NetworkDir == "":
-		return nil, nil, fmt.Errorf("NetworkDir must be set to " +
-			"create WalletKit RPC server")
+		return fmt.Errorf("NetworkDir must be set to create " +
+			"WalletKit RPC server")
 
 	case config.FeeEstimator == nil:
-		return nil, nil, fmt.Errorf("FeeEstimator must be set to " +
-			"create WalletKit RPC server")
+		return fmt.Errorf("FeeEstimator must be set to create " +
+			"WalletKit RPC server")
 
 	case config.Wallet == nil:
-		return nil, nil, fmt.Errorf("Wallet must be set to create " +
-			"WalletKit RPC server")
+		return fmt.Errorf("Wallet must be set to create WalletKit " +
+			"RPC server")
 
 	case config.KeyRing == nil:
-		return nil, nil, fmt.Errorf("KeyRing must be set to create " +
-			"WalletKit RPC server")
+		return fmt.Errorf("KeyRing must be set to create WalletKit " +
+			"RPC server")
 
 	case config.Sweeper == nil:
-		return nil, nil, fmt.Errorf("Sweeper must be set to create " +
-			"WalletKit RPC server")
+		return fmt.Errorf("Sweeper must be set to create WalletKit " +
+			"RPC server")
 
 	case config.Chain == nil:
-		return nil, nil, fmt.Errorf("Chain must be set to create " +
-			"WalletKit RPC server")
+		return fmt.Errorf("Chain must be set to create WalletKit RPC " +
+			"server")
 	}
 
-	return New(config)
+	return nil
 }
 
 func init() {

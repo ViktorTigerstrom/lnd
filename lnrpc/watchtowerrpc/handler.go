@@ -79,6 +79,23 @@ func (c *Handler) Stop() error {
 	return nil
 }
 
+// InjectDependencies populates that the sub-server's dependencies ensures that
+// they have been properly set.
+//
+// NOTE: This is part of the lnrpc.SubServer interface.
+func (c *Handler) InjectDependencies(
+	configRegistry lnrpc.SubServerConfigDispatcher) error {
+
+	cfg, err := getConfig(configRegistry, true)
+	if err != nil {
+		return err
+	}
+
+	c.cfg = *cfg
+
+	return nil
+}
+
 // Name returns a unique string representation of the sub-server. This can be
 // used to identify the sub-server and also de-duplicate them.
 //
