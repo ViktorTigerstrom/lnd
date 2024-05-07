@@ -2266,6 +2266,9 @@
           "type": "boolean",
           "title": "MAYBE"
         },
+        "ping": {
+          "type": "boolean"
+        },
         "shared_key_request": {
           "$ref": "#/definitions/signrpcSharedKeyRequest"
         },

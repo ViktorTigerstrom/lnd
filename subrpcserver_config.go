@@ -355,13 +355,31 @@ func (s *subRPCServerConfigs) PopulateRemoteSignerCfgValues(cfg *Config,
 	cc *chainreg.ChainControl, networkDir string,
 	macService *macaroons.Service, activeNetParams *chaincfg.Params) error {
 
-	s.WalletKitRPC.RemoteSignerConfig = cfg.RemoteSigner
+	// Only populate the config values with the remote signer if it's
+	// enabled.
+	if cfg.RemoteSigner == nil || !cfg.RemoteSigner.Enable {
+		return nil
+	}
+
+	/*s.WalletKitRPC.RemoteSignerConfig = cfg.RemoteSigner
 
 	kRing, ok := cc.Wallet.WalletController.(*rpcwallet.RPCKeyRing)
 	if ok {
 		s.WalletKitRPC.RemoteSigner = kRing.RemoteSigner()
-	}
+	}*/
 
+	subCfgValue := extractReflectValue(s.WalletKitRPC)
+
+	subCfgValue.FieldByName("RemoteSignerConfig").Set(
+		reflect.ValueOf(cfg.RemoteSigner),
+	)
+
+	kRing, ok := cc.Wallet.WalletController.(*rpcwallet.RPCKeyRing)
+	if ok {
+		subCfgValue.FieldByName("RemoteSigner").Set(
+			reflect.ValueOf(kRing.RemoteSigner()),
+		)
+	}
 	/*
 		// First, we'll use reflect to obtain a version of the config struct
 		// that allows us to programmatically inspect its fields.
@@ -389,50 +407,18 @@ func (s *subRPCServerConfigs) PopulateRemoteSignerCfgValues(cfg *Config,
 			if subCfg, ok := field.Interface().(*walletrpc.Config); ok {
 				subCfgValue := extractReflectValue(subCfg)
 
-				/*subCfgValue.FieldByName("NetworkDir").Set(
-					reflect.ValueOf(networkDir),
+				subCfgValue.FieldByName("RemoteSignerConfig").Set(
+					reflect.ValueOf(cfg.RemoteSigner),
 				)
-				subCfgValue.FieldByName("MacService").Set(
-					reflect.ValueOf(macService),
-				)
-				subCfgValue.FieldByName("FeeEstimator").Set(
-					reflect.ValueOf(cc.FeeEstimator),
-				)
-				subCfgValue.FieldByName("Wallet").Set(
-					reflect.ValueOf(cc.Wallet),
-				)
-				subCfgValue.FieldByName("CoinSelectionLocker").Set(
-					reflect.ValueOf(cc.Wallet),
-				)
-				subCfgValue.FieldByName("KeyRing").Set(
-					reflect.ValueOf(cc.KeyRing),
-				)
-				subCfgValue.FieldByName("Chain").Set(
-					reflect.ValueOf(cc.ChainIO),
-				)
-				subCfgValue.FieldByName("ChainParams").Set(
-					reflect.ValueOf(activeNetParams),
-				)
-				subCfgValue.FieldByName("CurrentNumAnchorChans").Set(
-					reflect.ValueOf(cc.Wallet.CurrentNumAnchorChans),
-				)
-				subCfgValue.FieldByName("CoinSelectionStrategy").Set(
-					reflect.ValueOf(
-						cc.Wallet.Cfg.CoinSelectionStrategy,
-					),
-				)*/
-	/*subCfgValue.FieldByName("RemoteSignerConfig").Set(
-				reflect.ValueOf(cfg.RemoteSigner),
-			)
 
-			kRing, ok := cc.Wallet.WalletController.(*rpcwallet.RPCKeyRing)
-			if ok {
-				subCfgValue.FieldByName("RemoteSigner").Set(
-					reflect.ValueOf(kRing.RemoteSigner()),
-				)
+				kRing, ok := cc.Wallet.WalletController.(*rpcwallet.RPCKeyRing)
+				if ok {
+					subCfgValue.FieldByName("RemoteSigner").Set(
+						reflect.ValueOf(kRing.RemoteSigner()),
+					)
+				}
 			}
-		}
-	}*/
+		}*/
 
 	return nil
 }

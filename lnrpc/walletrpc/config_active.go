@@ -81,7 +81,7 @@ type Config struct {
 	// RemoteSignerConfig is the configuration for the RemoteSigner.
 	RemoteSignerConfig *lncfg.RemoteSigner
 
-	// Todo: Add the actual remote signer here, that only get's set if there was an actual remote signer set.
-	// This must be of the RemoteSigner interface that we've defined within the walletrpc package.
+	// RemoteSigner is the remote signer that the WalletKit will use to
+	// sign transactions, if enabled.
 	RemoteSigner RemoteSigner
 }

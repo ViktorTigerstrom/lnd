@@ -48,6 +48,11 @@ var (
 	ErrUnexpectedResponse = errors.New("unexpected response type")
 )
 
+type ResponsePair struct {
+	ID       uint64
+	Response *walletrpc.SignCoordinatorResponse
+}
+
 // RPCKeyRing is an implementation of the SecretKeyRing interface that uses a
 // local watch-only wallet for keeping track of addresses and transactions but
 // delegates any signing or ECDH operations to a remote node through RPC.
@@ -59,7 +64,7 @@ type SignCoordinator struct {
 
 	stream walletrpc.WalletKit_SignCoordinatorStreamsServer
 
-	responses map[uint64]*walletrpc.SignCoordinatorResponse
+	responses map[uint64]chan *walletrpc.SignCoordinatorResponse
 
 	receiveErrChan chan error
 
@@ -74,11 +79,11 @@ type SignCoordinator struct {
 
 	nextRequestID uint64
 
-	mu sync.Mutex
-
 	responseTimeout time.Duration
 
 	connectionTimeout time.Duration
+
+	mu sync.Mutex
 
 	wg sync.WaitGroup
 }
@@ -87,7 +92,7 @@ type SignCoordinator struct {
 func NewSignCoordinator(responseTimeout time.Duration,
 	connectionTimeout time.Duration) *SignCoordinator {
 
-	respsMap := make(map[uint64]*walletrpc.SignCoordinatorResponse)
+	respsMap := make(map[uint64]chan *walletrpc.SignCoordinatorResponse)
 
 	// requestID 1 is reserved for the initial handshake by the remote
 	// signer.
@@ -156,7 +161,11 @@ func (s *SignCoordinator) Stop() {
 	log.Infof("Stopping Sign Coordinator")
 	defer log.Debugf("Sign coordinator stopped")
 
+	s.mu.Lock()
+
 	close(s.quit)
+
+	s.mu.Unlock()
 
 	s.wg.Wait()
 }
@@ -214,7 +223,7 @@ func (s *SignCoordinator) Handshake(
 			"registration message: %v", err)
 
 	case <-s.quit:
-		return walletrpc.ErrServerShuttingDown
+		return ErrShuttingDown
 
 	case <-ctxc.Done():
 		return ctxc.Err()
@@ -250,7 +259,7 @@ func (s *SignCoordinator) Handshake(
 		return ctxc.Err()
 
 	case <-s.quit:
-		return walletrpc.ErrServerShuttingDown
+		return ErrShuttingDown
 
 	case <-registerDoneChan:
 	}
@@ -260,38 +269,75 @@ func (s *SignCoordinator) Handshake(
 	return nil
 }
 
-func (s *SignCoordinator) StartReceiving() error {
+func (s *SignCoordinator) StartReceiving() {
 	s.wg.Add(1)
 	defer s.wg.Done()
+
+	// Signals to any ongoing requests that the remote signer is no longer
+	// connected.
+	defer close(s.doneReceiving)
 
 	for {
 		resp, err := s.stream.Recv()
 		if err != nil {
-			// Send the error over the error channel, so that any
-			// ongoing requests awaiting a response can terminate
-			// early.
-			s.receiveErrChan <- err
+			// We grab the lock here to ensure that the quit channel
+			// cannot be closed after we've entered the default case
+			// below, but before sending the error over the error
+			// channel. If that were to happen, the main Run method
+			// would not be able to receive the error sent over the
+			// error channel as it'd exit on the closing of the quit
+			// channel. That would cause the error sending to hang,
+			// and in turn cause the deferred s.wg.Done() to never
+			// be called, causing a deadlock.
+			s.mu.Lock()
+			defer s.mu.Unlock()
 
-			close(s.doneReceiving)
+			select {
+			case <-s.quit:
+				// If we've already shut down, the main Run
+				// method will not be able to receive any error
+				// sent over the error channel. So we just
+				// return.
+				return
+			default:
+				// Send the error over the error channel, so
+				// that the main Run method can return the error
+				s.receiveErrChan <- err
+			}
 
-			return err
+			return
 		}
 
 		s.mu.Lock()
 
-		s.responses[resp.GetRequestId()] = resp
+		if respChan, ok := s.responses[resp.GetRequestId()]; ok {
+			respChan <- resp
+
+			close(respChan)
+		}
+		// If there's no response channel, the thread waiting for the
+		// response has most likely timed out. We therefore ignore the
+		// response. The other scenario where we don't have a response
+		// channel would be if we received a response for a request that
+		// we didn't send. This should never happen, but if it does, we
+		// ignore the response.
 
 		s.mu.Unlock()
 
 		select {
 		case <-s.quit:
-			return ErrShuttingDown
+			return
 		default:
 		}
 	}
 }
 
 func (s *SignCoordinator) WaitUntilConnected() error {
+	return s.waitUntilConnectedWithTimeout(s.connectionTimeout)
+}
+
+func (s *SignCoordinator) waitUntilConnectedWithTimeout(
+	timeout time.Duration) error {
 	select {
 	case <-s.clientConnected:
 		return nil
@@ -299,7 +345,7 @@ func (s *SignCoordinator) WaitUntilConnected() error {
 	case <-s.quit:
 		return ErrShuttingDown
 
-	case <-time.After(s.connectionTimeout):
+	case <-time.After(timeout):
 		return ErrConnectTimeout
 
 	case <-s.doneReceiving:
@@ -318,43 +364,128 @@ func (s *SignCoordinator) getNextRequestID() uint64 {
 	return nextRequestID
 }
 
-func (s *SignCoordinator) getResponse(
-	requestID uint64) (*walletrpc.SignCoordinatorResponse, error) {
+func (s *SignCoordinator) createResponseChannel(requestID uint64) func() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	respChan := make(chan *walletrpc.SignCoordinatorResponse, 1)
+
+	s.responses[requestID] = respChan
+
+	// Create a cleanup function that will delete the response channel.
+	return func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+
+		select {
+		case <-respChan:
+			// If we have timed out, there could be a very unlikely
+			// scenario, were we did receive a response before we
+			// managed to grab the lock in the cleanup func.
+			// In that case we'll just ignore the response.
+			// We should still clean up the response channel though.
+		default:
+		}
+
+		delete(s.responses, requestID)
+	}
+}
+
+// getResponse waits for a response with the given request id, and returns the
+// response if it is received. If the response is an error, the error message is
+// returned. If the response is not received within the given timeout, an error
+// is returned.
+// Before calling this function, the caller must have created a response channel
+// for the request id.
+func (s *SignCoordinator) getResponse(requestID uint64,
+	timeout time.Duration) (*walletrpc.SignCoordinatorResponse, error) {
+
+	s.mu.Lock()
+
+	if _, ok := s.responses[requestID]; !ok {
+		// Should be impossible to reach this case, as we create the
+		// response channel before sending the request.
+		s.mu.Unlock()
+
+		return nil, fmt.Errorf("no response channel found for request "+
+			"id %d", requestID)
+	}
+
+	respChan := s.responses[requestID]
+
+	s.mu.Unlock()
+
+	select {
+	case resp := <-respChan:
+		// If the response is an error, we return the error
+		// message.
+		if errorResp, ok := resp.GetSignResponseType().(*walletrpc.SignCoordinatorResponse_SignerError); ok {
+			errStr := errorResp.SignerError.Error
+
+			return nil, errors.New(errStr)
+		}
+
+		log.Infof("Received response for request id %d",
+			requestID)
+
+		return resp, nil
+
+	case <-s.doneReceiving:
+		return nil, ErrNotConnected
+
+	case <-s.quit:
+		return nil, ErrShuttingDown
+
+	case <-time.After(timeout):
+		return nil, ErrResponseTimeout
+	}
+}
+
+func (s *SignCoordinator) Ping(timeout time.Duration) (bool, error) {
+	s.wg.Add(1)
+	defer s.wg.Done()
 
 	startTime := time.Now()
 
-	for {
-		s.mu.Lock()
-		if resp, ok := s.responses[requestID]; ok {
-			delete(s.responses, requestID)
-			s.mu.Unlock()
-
-			// If the response is an error, we return the error
-			// message.
-			if errorResp, ok := resp.GetSignResponseType().(*walletrpc.SignCoordinatorResponse_SignerError); ok {
-				errStr := errorResp.SignerError.Error
-
-				return nil, errors.New(errStr)
-			}
-
-			return resp, nil
-		}
-
-		s.mu.Unlock()
-
-		if time.Since(startTime) > s.responseTimeout {
-			return nil, ErrResponseTimeout
-		}
-
-		select {
-		case <-s.doneReceiving:
-			return nil, ErrNotConnected
-
-		case <-s.quit:
-			return nil, ErrShuttingDown
-		default:
-		}
+	err := s.waitUntilConnectedWithTimeout(timeout)
+	if err != nil {
+		return false, err
 	}
+
+	requestID := s.getNextRequestID()
+
+	req := &walletrpc.SignCoordinatorRequest_Ping{
+		Ping: true,
+	}
+
+	cleanUpChannel := s.createResponseChannel(requestID)
+	defer cleanUpChannel()
+
+	err = s.stream.Send(&walletrpc.SignCoordinatorRequest{
+		RequestId:       requestID,
+		SignRequestType: req,
+	})
+	if err != nil {
+		return false, err
+	}
+
+	newTimeout := timeout - time.Since(startTime)
+
+	if time.Since(startTime) > timeout {
+		return false, ErrResponseTimeout
+	}
+
+	resp, err := s.getResponse(requestID, newTimeout)
+	if err != nil {
+		return false, err
+	}
+
+	signResp := resp.GetPong()
+	if !signResp {
+		return false, ErrUnexpectedResponse
+	}
+
+	return signResp, nil
 }
 
 // DeriveSharedKey implements signrpc.SignerClient.
@@ -365,16 +496,23 @@ func (s *SignCoordinator) DeriveSharedKey(_ context.Context,
 	s.wg.Add(1)
 	defer s.wg.Done()
 
+	log.Infof("111111111 DeriveSharedKey request in SignCoordinator")
+
 	err := s.WaitUntilConnected()
 	if err != nil {
 		return nil, err
 	}
+
+	log.Infof("22222222 Done waiting for connection in SignCoordinator")
 
 	requestID := s.getNextRequestID()
 
 	req := &walletrpc.SignCoordinatorRequest_SharedKeyRequest{
 		SharedKeyRequest: in,
 	}
+
+	cleanUp := s.createResponseChannel(requestID)
+	defer cleanUp()
 
 	err = s.stream.Send(&walletrpc.SignCoordinatorRequest{
 		RequestId:       requestID,
@@ -384,7 +522,7 @@ func (s *SignCoordinator) DeriveSharedKey(_ context.Context,
 		return nil, err
 	}
 
-	resp, err := s.getResponse(requestID)
+	resp, err := s.getResponse(requestID, s.responseTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -405,16 +543,23 @@ func (s *SignCoordinator) MuSig2Cleanup(_ context.Context,
 	s.wg.Add(1)
 	defer s.wg.Done()
 
+	log.Infof("111111111 MuSig2Cleanup request in SignCoordinator")
+
 	err := s.WaitUntilConnected()
 	if err != nil {
 		return nil, err
 	}
+
+	log.Infof("22222222 Done waiting for connection in SignCoordinator")
 
 	requestID := s.getNextRequestID()
 
 	req := &walletrpc.SignCoordinatorRequest_MuSig2CleanupRequest{
 		MuSig2CleanupRequest: in,
 	}
+
+	cleanUp := s.createResponseChannel(requestID)
+	defer cleanUp()
 
 	err = s.stream.Send(&walletrpc.SignCoordinatorRequest{
 		RequestId:       requestID,
@@ -424,7 +569,7 @@ func (s *SignCoordinator) MuSig2Cleanup(_ context.Context,
 		return nil, err
 	}
 
-	resp, err := s.getResponse(requestID)
+	resp, err := s.getResponse(requestID, s.responseTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -445,16 +590,23 @@ func (s *SignCoordinator) MuSig2CombineSig(_ context.Context,
 	s.wg.Add(1)
 	defer s.wg.Done()
 
+	log.Infof("111111111 MuSig2CombineSig request in SignCoordinator")
+
 	err := s.WaitUntilConnected()
 	if err != nil {
 		return nil, err
 	}
+
+	log.Infof("22222222 Done waiting for connection in SignCoordinator")
 
 	requestID := s.getNextRequestID()
 
 	req := &walletrpc.SignCoordinatorRequest_MuSig2CombineSigRequest{
 		MuSig2CombineSigRequest: in,
 	}
+
+	cleanUp := s.createResponseChannel(requestID)
+	defer cleanUp()
 
 	err = s.stream.Send(&walletrpc.SignCoordinatorRequest{
 		RequestId:       requestID,
@@ -464,7 +616,7 @@ func (s *SignCoordinator) MuSig2CombineSig(_ context.Context,
 		return nil, err
 	}
 
-	resp, err := s.getResponse(requestID)
+	resp, err := s.getResponse(requestID, s.responseTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -485,16 +637,23 @@ func (s *SignCoordinator) MuSig2CreateSession(_ context.Context,
 	s.wg.Add(1)
 	defer s.wg.Done()
 
+	log.Infof("111111111 MuSig2CreateSession request in SignCoordinator")
+
 	err := s.WaitUntilConnected()
 	if err != nil {
 		return nil, err
 	}
+
+	log.Infof("22222222 Done waiting for connection in SignCoordinator")
 
 	requestID := s.getNextRequestID()
 
 	req := &walletrpc.SignCoordinatorRequest_MuSig2SessionRequest{
 		MuSig2SessionRequest: in,
 	}
+
+	cleanUp := s.createResponseChannel(requestID)
+	defer cleanUp()
 
 	err = s.stream.Send(&walletrpc.SignCoordinatorRequest{
 		RequestId:       requestID,
@@ -504,7 +663,7 @@ func (s *SignCoordinator) MuSig2CreateSession(_ context.Context,
 		return nil, err
 	}
 
-	resp, err := s.getResponse(requestID)
+	resp, err := s.getResponse(requestID, s.responseTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -526,16 +685,23 @@ func (s *SignCoordinator) MuSig2RegisterNonces(_ context.Context,
 	s.wg.Add(1)
 	defer s.wg.Done()
 
+	log.Infof("111111111 MuSig2RegisterNonces request in SignCoordinator")
+
 	err := s.WaitUntilConnected()
 	if err != nil {
 		return nil, err
 	}
+
+	log.Infof("22222222 Done waiting for connection in SignCoordinator")
 
 	requestID := s.getNextRequestID()
 
 	req := &walletrpc.SignCoordinatorRequest_MuSig2RegisterNoncesRequest{
 		MuSig2RegisterNoncesRequest: in,
 	}
+
+	cleanUp := s.createResponseChannel(requestID)
+	defer cleanUp()
 
 	err = s.stream.Send(&walletrpc.SignCoordinatorRequest{
 		RequestId:       requestID,
@@ -545,7 +711,7 @@ func (s *SignCoordinator) MuSig2RegisterNonces(_ context.Context,
 		return nil, err
 	}
 
-	resp, err := s.getResponse(requestID)
+	resp, err := s.getResponse(requestID, s.responseTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -566,16 +732,23 @@ func (s *SignCoordinator) MuSig2Sign(_ context.Context,
 	s.wg.Add(1)
 	defer s.wg.Done()
 
+	log.Infof("111111111 MuSig2Sign request in SignCoordinator")
+
 	err := s.WaitUntilConnected()
 	if err != nil {
 		return nil, err
 	}
+
+	log.Infof("22222222 Done waiting for connection in SignCoordinator")
 
 	requestID := s.getNextRequestID()
 
 	req := &walletrpc.SignCoordinatorRequest_MuSig2SignRequest{
 		MuSig2SignRequest: in,
 	}
+
+	cleanUp := s.createResponseChannel(requestID)
+	defer cleanUp()
 
 	err = s.stream.Send(&walletrpc.SignCoordinatorRequest{
 		RequestId:       requestID,
@@ -585,7 +758,7 @@ func (s *SignCoordinator) MuSig2Sign(_ context.Context,
 		return nil, err
 	}
 
-	resp, err := s.getResponse(requestID)
+	resp, err := s.getResponse(requestID, s.responseTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -606,16 +779,23 @@ func (s *SignCoordinator) SignMessage(_ context.Context,
 	s.wg.Add(1)
 	defer s.wg.Done()
 
+	log.Infof("111111111 SignMessage request in SignCoordinator")
+
 	err := s.WaitUntilConnected()
 	if err != nil {
 		return nil, err
 	}
+
+	log.Infof("22222222 Done waiting for connection in SignCoordinator")
 
 	requestID := s.getNextRequestID()
 
 	req := &walletrpc.SignCoordinatorRequest_SignMessageReq{
 		SignMessageReq: in,
 	}
+
+	cleanUp := s.createResponseChannel(requestID)
+	defer cleanUp()
 
 	err = s.stream.Send(&walletrpc.SignCoordinatorRequest{
 		RequestId:       requestID,
@@ -625,7 +805,7 @@ func (s *SignCoordinator) SignMessage(_ context.Context,
 		return nil, err
 	}
 
-	resp, err := s.getResponse(requestID)
+	resp, err := s.getResponse(requestID, s.responseTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -645,16 +825,23 @@ func (s *SignCoordinator) SignPsbt(_ context.Context,
 	s.wg.Add(1)
 	defer s.wg.Done()
 
+	log.Infof("111111111 SignPsbt request in SignCoordinator")
+
 	err := s.WaitUntilConnected()
 	if err != nil {
 		return nil, err
 	}
+
+	log.Infof("22222222 Done waiting for connection in SignCoordinator")
 
 	requestID := s.getNextRequestID()
 
 	req := &walletrpc.SignCoordinatorRequest_SignPsbtRequest{
 		SignPsbtRequest: in,
 	}
+
+	cleanUp := s.createResponseChannel(requestID)
+	defer cleanUp()
 
 	err = s.stream.Send(&walletrpc.SignCoordinatorRequest{
 		RequestId:       requestID,
@@ -664,7 +851,7 @@ func (s *SignCoordinator) SignPsbt(_ context.Context,
 		return nil, err
 	}
 
-	resp, err := s.getResponse(requestID)
+	resp, err := s.getResponse(requestID, s.responseTimeout)
 	if err != nil {
 		return nil, err
 	}

@@ -84,7 +84,7 @@ func NewRemoteSignerClient(subServers []lnrpc.SubServer,
 		switch subServer.Name() {
 		case walletrpc.SubServerName:
 			walletServer = subServer.(walletrpc.WalletKitServer)
-		case signrpc.SubServerName:
+		case "SignRPC":
 			signerServer = subServer.(signrpc.SignerServer)
 		}
 	}
@@ -412,26 +412,39 @@ func (r *RemoteSignerClient) processSignRequests(ctx context.Context) error {
 	)
 
 	go func() {
-		req, err := r.stream.Recv()
-		if err != nil {
-			errChan <- fmt.Errorf("error receiving request from "+
-				"watch-only node: %v", err)
+		for {
+			req, err := r.stream.Recv()
+			if err != nil {
+				errChan <- fmt.Errorf("error receiving "+
+					"request from watch-only node: %v", err)
 
-			return
-		}
+				return
+			}
 
-		select {
-		case reqChan <- req:
-		case <-r.quit:
-			return
+			log.Infof("Received request from watch-only node: "+
+				"%v", req)
+
+			select {
+			case reqChan <- req:
+			case <-r.quit:
+				log.Infof("Stopping receive as remote signer " +
+					"client is shutting down")
+
+				return
+			}
 		}
 	}()
 
 	for {
+		log.Infof("Waiting for request from watch-only node")
+
 		select {
 		case req := <-reqChan:
 			err := r.handleRequest(ctx, req)
 			if err != nil {
+				log.Errorf("error handling request from "+
+					"watch-only node: %v", err)
+
 				return err
 			}
 
@@ -439,17 +452,23 @@ func (r *RemoteSignerClient) processSignRequests(ctx context.Context) error {
 			return ErrShuttingDown
 
 		case <-ctx.Done():
+			log.Infof("Context done")
+
 			return ctx.Err()
 
 		case err := <-errChan:
-			return err
+			log.Errorf("error receiving request from watch-only "+
+				"node: %v", err)
 
+			return err
 		}
 	}
 }
 
 func (r *RemoteSignerClient) handleRequest(ctx context.Context,
 	req *walletrpc.SignCoordinatorRequest) error {
+
+	log.Infof("Received request from watch-only node: %v", req)
 
 	resp, err := r.process(ctx, req)
 	if err != nil {
@@ -470,8 +489,12 @@ func (r *RemoteSignerClient) handleRequest(ctx context.Context,
 		}
 	}
 
+	log.Infof("Sending response to watch-only node: %v", resp)
+
 	err = r.sendResponse(ctx, resp)
 	if err != nil {
+		log.Errorf("error sending response to watch-only node: %v", err)
+
 		return fmt.Errorf("error sending response to "+
 			"watch-only node: %v", err)
 	}
@@ -487,6 +510,8 @@ func (r *RemoteSignerClient) process(ctx context.Context,
 
 	switch reqType := req.GetSignRequestType().(type) {
 	case *walletrpc.SignCoordinatorRequest_SharedKeyRequest:
+		log.Infof("Processing shared key request from watch-only node")
+
 		resp, err := r.signerServer.DeriveSharedKey(
 			ctx, reqType.SharedKeyRequest,
 		)
@@ -504,7 +529,10 @@ func (r *RemoteSignerClient) process(ctx context.Context,
 		}
 
 		return signResp, nil
+
 	case *walletrpc.SignCoordinatorRequest_SignMessageReq:
+		log.Infof("Processing sign message request from watch-only node")
+
 		resp, err := r.signerServer.SignMessage(
 			ctx, reqType.SignMessageReq,
 		)
@@ -522,6 +550,7 @@ func (r *RemoteSignerClient) process(ctx context.Context,
 		}
 
 		return signResp, nil
+
 	case *walletrpc.SignCoordinatorRequest_MuSig2SessionRequest:
 		resp, err := r.signerServer.MuSig2CreateSession(
 			ctx, reqType.MuSig2SessionRequest,
@@ -540,6 +569,7 @@ func (r *RemoteSignerClient) process(ctx context.Context,
 		}
 
 		return signResp, nil
+
 	case *walletrpc.SignCoordinatorRequest_MuSig2RegisterNoncesRequest:
 		resp, err := r.signerServer.MuSig2RegisterNonces(
 			ctx, reqType.MuSig2RegisterNoncesRequest,
@@ -558,6 +588,7 @@ func (r *RemoteSignerClient) process(ctx context.Context,
 		}
 
 		return signResp, nil
+
 	case *walletrpc.SignCoordinatorRequest_MuSig2SignRequest:
 		resp, err := r.signerServer.MuSig2Sign(
 			ctx, reqType.MuSig2SignRequest,
@@ -576,6 +607,7 @@ func (r *RemoteSignerClient) process(ctx context.Context,
 		}
 
 		return signResp, nil
+
 	case *walletrpc.SignCoordinatorRequest_MuSig2CombineSigRequest:
 		resp, err := r.signerServer.MuSig2CombineSig(
 			ctx, reqType.MuSig2CombineSigRequest,
@@ -594,6 +626,7 @@ func (r *RemoteSignerClient) process(ctx context.Context,
 		}
 
 		return signResp, nil
+
 	case *walletrpc.SignCoordinatorRequest_MuSig2CleanupRequest:
 		resp, err := r.signerServer.MuSig2Cleanup(
 			ctx, reqType.MuSig2CleanupRequest,
@@ -612,6 +645,7 @@ func (r *RemoteSignerClient) process(ctx context.Context,
 		}
 
 		return signResp, nil
+
 	case *walletrpc.SignCoordinatorRequest_SignPsbtRequest:
 		resp, err := r.walletServer.SignPsbt(
 			ctx, reqType.SignPsbtRequest,
@@ -630,6 +664,19 @@ func (r *RemoteSignerClient) process(ctx context.Context,
 		}
 
 		return signResp, nil
+
+	case *walletrpc.SignCoordinatorRequest_Ping:
+		rType := &walletrpc.SignCoordinatorResponse_Pong{
+			Pong: true,
+		}
+
+		signResp := &walletrpc.SignCoordinatorResponse{
+			RequestId:        requestId,
+			SignResponseType: rType,
+		}
+
+		return signResp, nil
+
 	default:
 		return nil, ErrRequestType
 	}

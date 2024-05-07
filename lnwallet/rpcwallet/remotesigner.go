@@ -28,6 +28,8 @@ type RemoteSigner interface {
 
 	Ready() error
 
+	Ping(timeout time.Duration) error
+
 	Run(stream walletrpc.WalletKit_SignCoordinatorStreamsServer) error
 }
 
@@ -35,6 +37,12 @@ type StandardRemoteSigner struct {
 	signrpc.SignerClient
 
 	walletrpc.WalletKitClient
+
+	rpcHost string
+
+	tlsCertPath string
+
+	macaroonPath string
 
 	timeout time.Duration
 }
@@ -51,6 +59,29 @@ func (r *StandardRemoteSigner) Ready() error {
 	// The remote signer is ready as soon we have connected to to the remote
 	// signer node in the constructor. Therefore, we always return nil here
 	// to signal that we are ready.
+	return nil
+}
+
+// Ping implements RemoteSigner.
+func (r *StandardRemoteSigner) Ping(timeout time.Duration) error {
+	conn, err := connectRPC(
+		r.rpcHost, r.tlsCertPath, r.macaroonPath,
+		timeout,
+	)
+	if err != nil {
+		return fmt.Errorf("error connecting to the remote "+
+			"signing node through RPC: %v", err)
+	}
+
+	defer func() {
+		err = conn.Close()
+		if err != nil {
+			log.Warnf("Failed to close health check "+
+				"connection to remote signing node: %v",
+				err)
+		}
+	}()
+
 	return nil
 }
 
@@ -162,7 +193,23 @@ func (r *ReverseRemoteSigner) Timeout() time.Duration {
 // Ready implements RemoteSigner.
 func (r *ReverseRemoteSigner) Ready() error {
 	log.Infof("Waiting for the remote signer to connect")
+
 	return r.SignCoordinator.WaitUntilConnected()
+}
+
+func (r *ReverseRemoteSigner) Ping(timeout time.Duration) error {
+	pong, err := r.SignCoordinator.Ping(timeout)
+	if err != nil {
+		return fmt.Errorf("health check ping to remote signer "+
+			"errored: %w", err)
+	}
+
+	if !pong {
+		return fmt.Errorf("incorrect pong response from " +
+			"remote signer for ping request in health check")
+	}
+
+	return nil
 }
 
 // Run implements RemoteSigner.
@@ -170,92 +217,6 @@ func (r *ReverseRemoteSigner) Run(
 	stream walletrpc.WalletKit_SignCoordinatorStreamsServer) error {
 
 	return r.SignCoordinator.Run(stream)
-
-	/*var (
-		registerChan     = make(chan *walletrpc.SignCoordinatorResponse, 1)
-		registerDoneChan = make(chan struct{})
-		errChan          = make(chan error, 1)
-	)
-	ctxc, cancel := context.WithTimeout(
-		stream.Context(), r.Timeout(),
-	)
-	defer cancel()
-
-	// Read the first message in a goroutine because the Recv method blocks
-	// until the message arrives.
-	go func() {
-		msg, err := stream.Recv()
-		if err != nil {
-			errChan <- err
-
-			return
-		}
-
-		registerChan <- msg
-	}()
-
-	// Wait for the initial message to arrive or time out if it takes too
-	// long.
-	var registrationMsg *walletrpc.SignCoordinatorResponse
-	select {
-	case registrationMsg = <-registerChan:
-		if registrationMsg.GetRequestId() != 1 {
-			return fmt.Errorf("initial request id must be 1, but "+
-				"is: %d", registrationMsg.GetRequestId())
-		}
-		register := registrationMsg.GetSignerRegistration()
-		if !register {
-			return fmt.Errorf("invalid initial remote signer " +
-				"registration message")
-		}
-
-	case err := <-errChan:
-		return fmt.Errorf("error receiving initial remote signer "+
-			"registration message: %v", err)
-
-	case <-quit:
-		return walletrpc.ErrServerShuttingDown
-
-	case <-ctxc.Done():
-		return ctxc.Err()
-	}
-
-	// Send a message to the client to indicate that the registration has
-	// successfully completed.
-	regCompleteMsg := &walletrpc.SignCoordinatorRequest{
-		RequestId: 1,
-		SignRequestType: &walletrpc.SignCoordinatorRequest_RegistrationComplete{
-			RegistrationComplete: true,
-		},
-	}
-
-	// Send the message in a goroutine because the Send method blocks until
-	// the message is read by the client.
-	go func() {
-		err := stream.Send(regCompleteMsg)
-		if err != nil {
-			errChan <- err
-			return
-		}
-
-		close(registerDoneChan)
-	}()
-
-	select {
-	case err := <-errChan:
-		return fmt.Errorf("error sending registration complete "+
-			" message to remote signer: %v", err)
-
-	case <-ctxc.Done():
-		return ctxc.Err()
-
-	case <-quit:
-		return walletrpc.ErrServerShuttingDown
-
-	case <-registerDoneChan:
-	}
-
-	log.Infof("Remote signer connected")*/
 }
 
 var _ RemoteSigner = (*ReverseRemoteSigner)(nil)

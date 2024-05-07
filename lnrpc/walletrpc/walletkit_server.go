@@ -524,6 +524,8 @@ type RemoteSigner interface {
 
 	Ready() error
 
+	Ping(timeout time.Duration) error
+
 	Run(stream WalletKit_SignCoordinatorStreamsServer) error
 }
 

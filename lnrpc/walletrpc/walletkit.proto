@@ -378,21 +378,23 @@ message SignCoordinatorRequest {
         // MAYBE
         bool registration_complete = 2;
 
-        signrpc.SharedKeyRequest shared_key_request = 3;
+        bool ping = 3;
 
-        signrpc.SignMessageReq sign_message_req = 4;
+        signrpc.SharedKeyRequest shared_key_request = 4;
 
-        signrpc.MuSig2SessionRequest mu_sig2_session_request = 5;
+        signrpc.SignMessageReq sign_message_req = 5;
 
-        signrpc.MuSig2RegisterNoncesRequest mu_sig2_register_nonces_request = 6;
+        signrpc.MuSig2SessionRequest mu_sig2_session_request = 6;
 
-        signrpc.MuSig2SignRequest mu_sig2_sign_request = 7;
+        signrpc.MuSig2RegisterNoncesRequest mu_sig2_register_nonces_request = 7;
 
-        signrpc.MuSig2CombineSigRequest mu_sig2_combine_sig_request = 8;
+        signrpc.MuSig2SignRequest mu_sig2_sign_request = 8;
 
-        signrpc.MuSig2CleanupRequest mu_sig2_cleanup_request = 9;
+        signrpc.MuSig2CombineSigRequest mu_sig2_combine_sig_request = 9;
 
-        SignPsbtRequest sign_psbt_request = 10;
+        signrpc.MuSig2CleanupRequest mu_sig2_cleanup_request = 10;
+
+        SignPsbtRequest sign_psbt_request = 11;
     }
 }
 
@@ -411,24 +413,26 @@ message SignCoordinatorResponse {
     oneof sign_response_type {
         bool signer_registration = 2;
 
-        signrpc.SharedKeyResponse shared_key_response = 3;
+        bool pong = 3;
 
-        signrpc.SignMessageResp sign_message_resp = 4;
+        signrpc.SharedKeyResponse shared_key_response = 4;
 
-        signrpc.MuSig2SessionResponse mu_sig2_session_response = 5;
+        signrpc.SignMessageResp sign_message_resp = 5;
+
+        signrpc.MuSig2SessionResponse mu_sig2_session_response = 6;
 
         signrpc.MuSig2RegisterNoncesResponse mu_sig2_register_nonces_response =
-            6;
+            7;
 
-        signrpc.MuSig2SignResponse mu_sig2_sign_response = 7;
+        signrpc.MuSig2SignResponse mu_sig2_sign_response = 8;
 
-        signrpc.MuSig2CombineSigResponse mu_sig2_combine_sig_response = 8;
+        signrpc.MuSig2CombineSigResponse mu_sig2_combine_sig_response = 9;
 
-        signrpc.MuSig2CleanupResponse mu_sig2_cleanup_response = 9;
+        signrpc.MuSig2CleanupResponse mu_sig2_cleanup_response = 10;
 
-        SignPsbtResponse sign_psbt_response = 10;
+        SignPsbtResponse sign_psbt_response = 11;
 
-        SignerError signer_error = 11;
+        SignerError signer_error = 12;
     }
 }
 
