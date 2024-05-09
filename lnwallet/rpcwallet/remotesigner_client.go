@@ -13,7 +13,6 @@ import (
 	"github.com/lightningnetwork/lnd/lnrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/signrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/walletrpc"
-	"github.com/lightningnetwork/lnd/lnwallet/signcoordinator"
 	"github.com/lightningnetwork/lnd/macaroons"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -31,27 +30,180 @@ var (
 	ErrRequestType = errors.New("unimplemented request by watch-only node")
 )
 
-type RemoteSignerClient struct {
-	*signcoordinator.SignCoordinator
+const (
+	defaultRetryTimeout = time.Second * 1
 
+	retryMultiplier = 1.5
+)
+
+type SignCoordinatorStreamFeeder interface {
+	GetStream(streamCtx context.Context) (
+		walletrpc.WalletKit_SignCoordinatorStreamsClient, func(), error)
+
+	Stop()
+}
+
+type StreamFeeder struct {
+	cfg *lncfg.RemoteSigner
+
+	shouldConnect bool
+
+	connectionTimeout time.Duration
+
+	wg sync.WaitGroup
+
+	quit chan struct{}
+}
+
+// NewRemoteSignerClient creates a new instance of the remote signer client.
+func NewStreamFeeder(cfg *lncfg.RemoteSigner) *StreamFeeder {
+	shouldConnect := true
+
+	if cfg == nil || cfg.RPCHost == "" || cfg.MacaroonPath == "" ||
+		cfg.TLSCertPath == "" || cfg.InboundConnectionTimeout == 0 {
+
+		shouldConnect = false
+	}
+
+	if cfg == nil || cfg.SignerType != lncfg.SignerClientType {
+		shouldConnect = false
+	}
+
+	return &StreamFeeder{
+		cfg:               cfg,
+		shouldConnect:     shouldConnect,
+		connectionTimeout: cfg.InboundConnectionTimeout,
+		quit:              make(chan struct{}),
+	}
+}
+
+// Stop implements SignCoordinatorStreamFeeder.
+func (s *StreamFeeder) Stop() {
+	close(s.quit)
+
+	s.wg.Wait()
+}
+
+func (s *StreamFeeder) GetStream(streamCtx context.Context) (
+	walletrpc.WalletKit_SignCoordinatorStreamsClient, func(), error) {
+
+	if !s.shouldConnect {
+		return nil, nil, fmt.Errorf("config not correctly set to be " +
+			"able to connect to watch-only node")
+	}
+
+	s.wg.Add(1)
+	defer s.wg.Done()
+
+	conn, err := s.getClientConn()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	cleanUp := func() {
+		conn.Close()
+	}
+
+	walletKitClient := walletrpc.NewWalletKitClient(conn)
+
+	stream, err := walletKitClient.SignCoordinatorStreams(streamCtx)
+	if err != nil {
+		cleanUp()
+
+		return nil, nil, err
+	}
+
+	return stream, cleanUp, nil
+}
+
+func (s *StreamFeeder) getClientConn() (*grpc.ClientConn, error) {
+	ctx, cancel := context.WithTimeout(
+		context.Background(), s.connectionTimeout,
+	)
+	defer cancel()
+
+	// Load the specified macaroon file.
+	macBytes, err := os.ReadFile(s.cfg.MacaroonPath)
+	if err != nil {
+		return nil, fmt.Errorf("could not read macaroon file: %v", err)
+	}
+
+	mac := &macaroon.Macaroon{}
+
+	err = mac.UnmarshalBinary(macBytes)
+	if err != nil {
+		return nil, fmt.Errorf("could not unmarshal macaroon: %v", err)
+	}
+
+	macCred, err := macaroons.NewMacaroonCredential(mac)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"could not create macaroon credential: %v", err)
+	}
+
+	tlsCreds, err := credentials.NewClientTLSFromFile(s.cfg.TLSCertPath, "")
+	if err != nil {
+		return nil, fmt.Errorf("could not load TLS cert: %v", err)
+	}
+
+	opts := []grpc.DialOption{
+		grpc.WithBlock(),
+		grpc.WithTransportCredentials(tlsCreds),
+		grpc.WithPerRPCCredentials(macCred),
+	}
+
+	var (
+		connDoneChan = make(chan *grpc.ClientConn, 1)
+		errChan      = make(chan error, 1)
+	)
+
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+
+		conn, err := grpc.DialContext(ctx, s.cfg.RPCHost, opts...)
+		if err != nil {
+			errChan <- fmt.Errorf("could not connect to "+
+				"watch-only node: %v", err)
+		}
+
+		select {
+		case <-s.quit:
+			return
+		case <-ctx.Done():
+			return
+		default:
+			connDoneChan <- conn
+		}
+	}()
+
+	select {
+	case conn := <-connDoneChan:
+		return conn, nil
+
+	case err := <-errChan:
+		return nil, err
+
+	case <-s.quit:
+		return nil, ErrShuttingDown
+
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+var _ SignCoordinatorStreamFeeder = (*StreamFeeder)(nil)
+
+type RemoteSignerClient struct {
 	walletServer walletrpc.WalletKitServer
 
 	signerServer signrpc.SignerServer
 
-	// WatchOnlyRPCHost is the host:port of the watch-only lnd node.
-	watchOnlyRPCHost string
-
-	// MacaroonPath is the path to the macaroon file for the watch-only
-	// node.
-	macaroonPath string
-
-	// TLSCertPath is the path to the TLS certificate for the watch-only
-	// node.
-	tlsCertPath string
-
-	shouldRun bool
+	streamFeeder SignCoordinatorStreamFeeder
 
 	stream walletrpc.WalletKit_SignCoordinatorStreamsClient
+
+	shouldRun bool
 
 	connectionTimeout time.Duration
 
@@ -73,6 +225,7 @@ type RemoteSignerClient struct {
 
 // NewRemoteSignerClient creates a new instance of the remote signer client.
 func NewRemoteSignerClient(subServers []lnrpc.SubServer,
+	streamFeeder SignCoordinatorStreamFeeder,
 	cfg *lncfg.RemoteSigner) (*RemoteSignerClient, error) {
 
 	var (
@@ -99,17 +252,18 @@ func NewRemoteSignerClient(subServers []lnrpc.SubServer,
 			"to create a remote signer client")
 	}
 
+	shouldRun := cfg != nil && cfg.SignerType == lncfg.SignerClientType &&
+		cfg.InboundConnectionTimeout != 0
+
 	return &RemoteSignerClient{
 		walletServer:      walletServer,
 		signerServer:      signerServer,
-		watchOnlyRPCHost:  cfg.RPCHost,
-		macaroonPath:      cfg.MacaroonPath,
-		tlsCertPath:       cfg.TLSCertPath,
+		streamFeeder:      streamFeeder,
 		connectionTimeout: cfg.InboundConnectionTimeout,
-		shouldRun:         cfg.SignerType == lncfg.SignerClientType,
+		shouldRun:         shouldRun,
 		doneReceiving:     make(chan struct{}),
 		quit:              make(chan struct{}),
-		retryTimeout:      time.Second * 1,
+		retryTimeout:      defaultRetryTimeout,
 	}, nil
 }
 
@@ -122,10 +276,14 @@ func (r *RemoteSignerClient) Start() error {
 		return nil
 	}
 
+	r.wg.Add(1)
+
 	// We'll continuously try setup a connection to the watch-only node, and
 	// retry to connect if the connection fails until we Stop the remote
 	// signer client.
 	go func() {
+		defer r.wg.Done()
+
 		for {
 			err := r.run()
 			log.Errorf("Remote signer client error: %v", err)
@@ -148,8 +306,8 @@ func (r *RemoteSignerClient) Start() error {
 			log.Infof("Retrying to connect to watch-only node")
 
 			// Increase the retry timeout by 50% for every retry.
-			r.retryTimeout =
-				time.Duration(float64(r.retryTimeout) * 1.5)
+			r.retryTimeout = time.Duration(float64(r.retryTimeout) *
+				retryMultiplier)
 		}
 	}()
 
@@ -168,6 +326,10 @@ func (r *RemoteSignerClient) Stop() error {
 	// the stopping of the remote signer client.
 	r.wgMu.Lock()
 	defer r.wgMu.Unlock()
+
+	if r.streamFeeder != nil {
+		r.streamFeeder.Stop()
+	}
 
 	close(r.quit)
 
@@ -196,23 +358,17 @@ func (r *RemoteSignerClient) run() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var (
-		stream  walletrpc.WalletKit_SignCoordinatorStreamsClient
-		cleanup func()
-		err     error
-	)
-
 	// Try to setup the connection to the watch-only node until it succeeds
 	// or the context is canceled or the server is shutting down.
 	log.Infof("Attempting to setup connection to watch-only node")
 
-	stream, cleanup, err = r.setupStream(ctx)
+	stream, streamCleanUp, err := r.streamFeeder.GetStream(ctx)
 	if err != nil {
 		return err
 	}
 
 	r.stream = stream
-	defer cleanup()
+	defer streamCleanUp()
 
 	err = r.handshake(ctx)
 	if err != nil {
@@ -222,11 +378,12 @@ func (r *RemoteSignerClient) run() error {
 	log.Infof("Completed setup connection to watch-only node")
 
 	// Reset the retry timeout after a successful connection.
-	r.retryTimeout = time.Second * 1
+	r.retryTimeout = defaultRetryTimeout
 
 	return r.processSignRequests(ctx)
 }
 
+/*
 func (r *RemoteSignerClient) setupStream(streamCtx context.Context) (
 	walletrpc.WalletKit_SignCoordinatorStreamsClient, func(), error) {
 
@@ -316,6 +473,8 @@ func (r *RemoteSignerClient) getClientConn() (*grpc.ClientConn, error) {
 		return nil, ctx.Err()
 	}
 }
+
+*/
 
 func (r *RemoteSignerClient) handshake(streamCtx context.Context) error {
 	var (

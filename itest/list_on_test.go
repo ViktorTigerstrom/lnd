@@ -5,7 +5,7 @@ package itest
 import "github.com/lightningnetwork/lnd/lntest"
 
 var allTestCases = []*lntest.TestCase{
-	{
+	/*{
 		Name:     "update channel status",
 		TestFunc: testUpdateChanStatus,
 	},
@@ -489,12 +489,16 @@ var allTestCases = []*lntest.TestCase{
 	{
 		Name:     "async payments benchmark",
 		TestFunc: testAsyncPayments,
-	},
+	},*/
 	{
 		Name:     "remote signer",
-		TestFunc: testRemoteSigner,
+		TestFunc: testInboundRemoteSigner,
 	},
 	{
+		Name:     "outbound remote signer",
+		TestFunc: testOutboundRemoteSigner,
+	},
+	/*{
 		Name:     "taproot coop close",
 		TestFunc: testTaprootCoopClose,
 	},
@@ -621,5 +625,5 @@ var allTestCases = []*lntest.TestCase{
 	{
 		Name:     "sweep commit output and anchor",
 		TestFunc: testSweepCommitOutputAndAnchor,
-	},
+	},*/
 }

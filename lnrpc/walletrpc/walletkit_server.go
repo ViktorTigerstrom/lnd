@@ -536,7 +536,7 @@ func (w *WalletKit) SignCoordinatorStreams(
 
 	// Check that the user actually has configured that the reverse remote
 	// signer functionality should be enabled.
-	if !w.cfg.RemoteSignerConfig.Enable || w.cfg.RemoteSignerConfig.SignerType != lncfg.ReverseRemoteSignerType {
+	if !w.cfg.RemoteSignerConfig.Enable || w.cfg.RemoteSignerConfig.SignerType != lncfg.OutboundRemoteSignerType {
 		return fmt.Errorf("Reverse remote signer not enabled in config")
 	}
 

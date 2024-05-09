@@ -17,6 +17,8 @@ var (
 	// waiting for a request.
 	ErrRequestTimeout = errors.New(
 		"signcoordinator request timeout reached")
+
+	ErrStreamCanceled = errors.New("stream canceled")
 )
 
 type mockStream struct {
@@ -52,12 +54,11 @@ func (ms *mockStream) Recv() (*walletrpc.SignCoordinatorResponse, error) {
 	case <-ms.cancelChan:
 		// To simulate a canceled stream, we return an error when the
 		// cancelChan is closed.
-		return nil, errors.New("stream canceled")
+		return nil, ErrStreamCanceled
 	}
 }
 
 func (ms *mockStream) RecvMsg(msg any) error {
-	log.Infof("RecvMsg: %v", msg)
 	return nil
 }
 
@@ -66,7 +67,6 @@ func (ms *mockStream) SendHeader(metadata.MD) error {
 }
 
 func (ms *mockStream) SendMsg(m any) error {
-	log.Infof("SendMsg: %v", m)
 	return nil
 }
 func (ms *mockStream) SetHeader(metadata.MD) error {
@@ -478,6 +478,53 @@ func TestSignCoordinator_StopCoordinator(t *testing.T) {
 	stream.Cancel()
 
 	wg.Wait()
+
+	require.Less(t, time.Since(startTime), pingTimeout)
+
+	// Verify the responses map is empty after all responses are received
+	require.Empty(t, coordinator.responses)
+}
+
+func TestSignCoordinator_RemoteSignerDisconnects(t *testing.T) {
+	t.Parallel()
+
+	coordinator, stream, runErrChan := setupSignCoordinator(t)
+
+	pingTimeout := 3 * time.Second
+	startTime := time.Now()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	// Send a Ping request
+	go func() {
+		defer wg.Done()
+		success, err := coordinator.Ping(pingTimeout)
+		require.Equal(t, ErrNotConnected, err)
+		require.False(t, success)
+	}()
+
+	req, err := getRequest(stream)
+	require.NoError(t, err)
+
+	require.Equal(t, req.GetRequestId(), uint64(2))
+	require.True(t, req.GetPing())
+
+	// We simulate that the remote signer disconnects by canceling the
+	// stream.
+	stream.Cancel()
+
+	// This should cause the Run function to return the error that the
+	// stream was canceled with.
+	err = <-runErrChan
+	require.Equal(t, ErrStreamCanceled, err)
+
+	wg.Wait()
+
+	// Verify that the coordinator signals that it's done receiving
+	// responses after the stream is canceled, i.e. the StartReceiving
+	// function is no longer running.
+	<-coordinator.doneReceiving
 
 	require.Less(t, time.Since(startTime), pingTimeout)
 

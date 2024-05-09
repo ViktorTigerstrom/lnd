@@ -27,9 +27,9 @@ func (b *RemoteSignerBuilder) Build() (RemoteSigner, func(), error) {
 	}
 
 	switch b.cfg.SignerType {
-	case lncfg.DefaultStandardRemoteSignerType:
+	case lncfg.DefaultInboundRemoteSignerType:
 		return b.createStandardRemoteSigner()
-	case lncfg.ReverseRemoteSignerType:
+	case lncfg.OutboundRemoteSignerType:
 		return b.createReverseRemoteSigner()
 	default:
 		return nil, nil, errors.New("unknown remote signer type")

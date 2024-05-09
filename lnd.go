@@ -471,7 +471,7 @@ func Main(cfg *Config, lisCfg ListenerCfg, implCfg *ImplementationCfg,
 	// can handle other requests, we set the interceptor chain to be ready
 	// accept remote signer connections, if enabled by the cfg.
 	if cfg.RemoteSigner.Enable &&
-		cfg.RemoteSigner.SignerType == lncfg.ReverseRemoteSignerType {
+		cfg.RemoteSigner.SignerType == lncfg.OutboundRemoteSignerType {
 
 		interceptorChain.SetAllowRemoteSigner()
 	}
@@ -623,8 +623,10 @@ func Main(cfg *Config, lisCfg ListenerCfg, implCfg *ImplementationCfg,
 	// Initialize the remote signer client. If the
 	// cfg.RemoteSigner.SignerType != lncfg.SignerClientType, this remote
 	// signer client will not be possible to start.
+	streamFeeder := rpcwallet.NewStreamFeeder(cfg.RemoteSigner)
+
 	rsClient, err := rpcwallet.NewRemoteSignerClient(
-		rpcServer.subServers, cfg.RemoteSigner,
+		rpcServer.subServers, streamFeeder, cfg.RemoteSigner,
 	)
 	if err != nil {
 		return mkErr("unable create a remote signer client: %v",
