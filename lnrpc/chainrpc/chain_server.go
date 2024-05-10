@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
@@ -102,6 +103,8 @@ type ServerShell struct {
 // to create custom protocols, external to lnd, even backed by multiple distinct
 // lnd across independent failure domains.
 type Server struct {
+	injected int32 // To be used atomically.
+
 	// Required by the grpc-gateway/v2 library for forward compatibility.
 	UnimplementedChainNotifierServer
 	UnimplementedChainKitServer
@@ -187,6 +190,66 @@ func (s *Server) Stop() error {
 	s.stopped.Do(func() {
 		close(s.quit)
 	})
+	return nil
+}
+
+// InjectDependencies populates that the sub-server's dependencies ensures that
+// they have been properly set.
+//
+// NOTE: This is part of the lnrpc.SubServer interface.
+func (s *Server) InjectDependencies(
+	configRegistry lnrpc.SubServerConfigDispatcher) error {
+
+	if atomic.AddInt32(&s.injected, 1) != 1 {
+		return lnrpc.ErrAlreadyInjected
+	}
+
+	cfg, err := getConfig(configRegistry, true)
+	if err != nil {
+		return err
+	}
+
+	// If the path of the chain notifier macaroon wasn't generated, then
+	// we'll assume that it's found at the default network directory.
+	if cfg.ChainNotifierMacPath == "" {
+		cfg.ChainNotifierMacPath = filepath.Join(
+			cfg.NetworkDir, DefaultChainNotifierMacFilename,
+		)
+	}
+
+	// Now that we know the full path of the chain notifier macaroon, we can
+	// check to see if we need to create it or not. If stateless_init is set
+	// then we don't write the macaroons.
+	macFilePath := cfg.ChainNotifierMacPath
+	if cfg.MacService != nil && !cfg.MacService.StatelessInit &&
+		!lnrpc.FileExists(macFilePath) {
+
+		log.Infof("Baking macaroons for ChainNotifier RPC Server at: %v",
+			macFilePath)
+
+		// At this point, we know that the chain notifier macaroon
+		// doesn't yet, exist, so we need to create it with the help of
+		// the main macaroon service.
+		chainNotifierMac, err := cfg.MacService.NewMacaroon(
+			context.Background(), macaroons.DefaultRootKeyID,
+			macaroonOps...,
+		)
+		if err != nil {
+			return err
+		}
+		chainNotifierMacBytes, err := chainNotifierMac.M().MarshalBinary()
+		if err != nil {
+			return err
+		}
+		err = os.WriteFile(macFilePath, chainNotifierMacBytes, 0644)
+		if err != nil {
+			_ = os.Remove(macFilePath)
+			return err
+		}
+	}
+
+	s.cfg = *cfg
+
 	return nil
 }
 

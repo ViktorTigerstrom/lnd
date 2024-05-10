@@ -6,6 +6,8 @@ package autopilotrpc
 import (
 	"context"
 	"encoding/hex"
+	"errors"
+	"sync"
 	"sync/atomic"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -63,7 +65,7 @@ type ServerShell struct {
 // RPC server allows external callers to access the status of the autopilot
 // currently active within lnd, as well as configuring it at runtime.
 type Server struct {
-	started  int32 // To be used atomically.
+	injected int32 // To be used atomically.
 	shutdown int32 // To be used atomically.
 
 	// Required by the grpc-gateway/v2 library for forward compatibility.
@@ -74,6 +76,10 @@ type Server struct {
 	cfg *Config
 
 	manager *autopilot.Manager
+
+	// This mutex should be held when accessing any fields of this struct,
+	// that can be accessed before the dependencies have been injected.
+	mu sync.Mutex
 }
 
 // A compile time check to ensure that Server fully implements the
@@ -96,22 +102,33 @@ func New(cfg *Config) (*Server, lnrpc.MacaroonPerms, error) {
 	return server, macPermissions, nil
 }
 
-// Start launches any helper goroutines required for the Server to function.
+// Start normally launches any helper goroutines required for the Server to
+// function, but in this case, it is a noop as the autopilot manager is started
+// once the dependencies have been injected.
 //
 // NOTE: This is part of the lnrpc.SubServer interface.
 func (s *Server) Start() error {
-	if atomic.AddInt32(&s.started, 1) != 1 {
-		return nil
-	}
-
-	return s.manager.Start()
+	// The autopilot manager cannot be started until we have the
+	// dependencies injected. Therefore we do not start the manager here,
+	// but instead do that once the dependencies have been injected.
+	return nil
 }
 
 // Stop signals any active goroutines for a graceful closure.
 //
 // NOTE: This is part of the lnrpc.SubServer interface.
 func (s *Server) Stop() error {
+	// As the Stop function could in theory in the future be called before
+	// the InjectDependencies function has been executed, we need to hold
+	// the lock here.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if atomic.AddInt32(&s.shutdown, 1) != 1 {
+		return nil
+	}
+
+	if s.manager == nil {
 		return nil
 	}
 
@@ -124,6 +141,35 @@ func (s *Server) Stop() error {
 // NOTE: This is part of the lnrpc.SubServer interface.
 func (s *Server) Name() string {
 	return subServerName
+}
+
+// InjectDependencies populates that the sub-server's dependencies ensures that
+// they have been properly set.
+//
+// NOTE: This is part of the lnrpc.SubServer interface.
+func (s *Server) InjectDependencies(
+	configRegistry lnrpc.SubServerConfigDispatcher) error {
+
+	if atomic.AddInt32(&s.injected, 1) != 1 {
+		return lnrpc.ErrAlreadyInjected
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.shutdown != 0 {
+		return errors.New("server shutting down")
+	}
+
+	cfg, err := getConfig(configRegistry, true)
+	if err != nil {
+		return err
+	}
+
+	s.cfg = cfg
+	s.manager = cfg.Manager
+
+	return s.manager.Start()
 }
 
 // RegisterWithRootServer will be called by the root gRPC server to direct a

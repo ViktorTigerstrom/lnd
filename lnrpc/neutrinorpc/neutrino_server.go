@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -78,6 +79,8 @@ type ServerShell struct {
 // RPC server allows external callers to access the status of the neutrino
 // currently active within lnd, as well as configuring it at runtime.
 type Server struct {
+	injected int32 // To be used atomically.
+
 	// Required by the grpc-gateway/v2 library for forward compatibility.
 	// Must be after the atomically used variables to not break struct
 	// alignment.
@@ -116,6 +119,27 @@ func (s *Server) Start() error {
 //
 // NOTE: This is part of the lnrpc.SubServer interface.
 func (s *Server) Stop() error {
+	return nil
+}
+
+// InjectDependencies populates that the sub-server's dependencies ensures that
+// they have been properly set.
+//
+// NOTE: This is part of the lnrpc.SubServer interface.
+func (s *Server) InjectDependencies(
+	configRegistry lnrpc.SubServerConfigDispatcher) error {
+
+	if atomic.AddInt32(&s.injected, 1) != 1 {
+		return lnrpc.ErrAlreadyInjected
+	}
+
+	config, err := getConfig(configRegistry, true)
+	if err != nil {
+		return err
+	}
+
+	s.cfg = config
+
 	return nil
 }
 

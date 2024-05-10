@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
@@ -28,11 +29,11 @@ import (
 )
 
 const (
-	// subServerName is the name of the sub rpc server. We'll use this name
+	// SubServerName is the name of the sub rpc server. We'll use this name
 	// to register ourselves, and we also require that the main
 	// SubServerConfigDispatcher instance recognize this as the name of the
 	// config file that we need.
-	subServerName = "SignRPC"
+	SubServerName = "SignRPC"
 
 	// BIP0340 is the prefix for BIP0340-related tagged hashes.
 	BIP0340 = "BIP0340"
@@ -118,6 +119,8 @@ type ServerShell struct {
 // lnd. This allows callers to create custom protocols, external to lnd, even
 // backed by multiple distinct lnd across independent failure domains.
 type Server struct {
+	injected int32 // To be used atomically.
+
 	// Required by the grpc-gateway/v2 library for forward compatibility.
 	UnimplementedSignerServer
 
@@ -194,12 +197,72 @@ func (s *Server) Stop() error {
 	return nil
 }
 
+// InjectDependencies populates that the sub-server's dependencies ensures that
+// they have been properly set.
+//
+// NOTE: This is part of the lnrpc.SubServer interface.
+func (s *Server) InjectDependencies(
+	configRegistry lnrpc.SubServerConfigDispatcher) error {
+
+	if atomic.AddInt32(&s.injected, 1) != 1 {
+		return lnrpc.ErrAlreadyInjected
+	}
+
+	cfg, err := getConfig(configRegistry, true)
+	if err != nil {
+		return err
+	}
+
+	// If the path of the signer macaroon wasn't generated, then we'll
+	// assume that it's found at the default network directory.
+	if cfg.SignerMacPath == "" {
+		cfg.SignerMacPath = filepath.Join(
+			cfg.NetworkDir, DefaultSignerMacFilename,
+		)
+	}
+
+	// Now that we know the full path of the signer macaroon, we can check
+	// to see if we need to create it or not. If stateless_init is set
+	// then we don't write the macaroons.
+	macFilePath := cfg.SignerMacPath
+	if cfg.MacService != nil && !cfg.MacService.StatelessInit &&
+		!lnrpc.FileExists(macFilePath) {
+
+		log.Infof("Making macaroons for Signer RPC Server at: %v",
+			macFilePath)
+
+		// At this point, we know that the signer macaroon doesn't yet,
+		// exist, so we need to create it with the help of the main
+		// macaroon service.
+		signerMac, err := cfg.MacService.NewMacaroon(
+			context.Background(), macaroons.DefaultRootKeyID,
+			macaroonOps...,
+		)
+		if err != nil {
+			return err
+		}
+		signerMacBytes, err := signerMac.M().MarshalBinary()
+		if err != nil {
+			return err
+		}
+		err = os.WriteFile(macFilePath, signerMacBytes, 0644)
+		if err != nil {
+			_ = os.Remove(macFilePath)
+			return err
+		}
+	}
+
+	s.cfg = cfg
+
+	return nil
+}
+
 // Name returns a unique string representation of the sub-server. This can be
 // used to identify the sub-server and also de-duplicate them.
 //
 // NOTE: This is part of the lnrpc.SubServer interface.
 func (s *Server) Name() string {
-	return subServerName
+	return SubServerName
 }
 
 // RegisterWithRootServer will be called by the root gRPC server to direct a
@@ -473,6 +536,7 @@ func (s *Server) SignOutputRaw(_ context.Context, in *SignReq) (*SignResp,
 	resp := &SignResp{
 		RawSigs: make([][]byte, numSigs),
 	}
+
 	for i, signDesc := range signDescs {
 		sig, err := s.cfg.Signer.SignOutputRaw(&txToSign, signDesc)
 		if err != nil {
@@ -575,6 +639,7 @@ func (s *Server) ComputeInputScript(ctx context.Context,
 	resp := &InputScriptResp{
 		InputScripts: make([]*InputScript, numWitnesses),
 	}
+
 	for i, signDesc := range signDescs {
 		inputScript, err := s.cfg.Signer.ComputeInputScript(
 			&txToSign, signDesc,

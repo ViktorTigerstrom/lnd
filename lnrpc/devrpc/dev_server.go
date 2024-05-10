@@ -54,6 +54,8 @@ type ServerShell struct {
 // RPC server allows developers to set and query LND state that is not possible
 // during normal operation.
 type Server struct {
+	injected int32 // To be used atomically.
+
 	started  int32 // To be used atomically.
 	shutdown int32 // To be used atomically.
 
@@ -102,6 +104,27 @@ func (s *Server) Stop() error {
 	if atomic.AddInt32(&s.shutdown, 1) != 1 {
 		return nil
 	}
+
+	return nil
+}
+
+// InjectDependencies populates that the sub-server's dependencies ensures that
+// they have been properly set.
+//
+// NOTE: This is part of the lnrpc.SubServer interface.
+func (s *Server) InjectDependencies(
+	configRegistry lnrpc.SubServerConfigDispatcher) error {
+
+	if atomic.AddInt32(&s.injected, 1) != 1 {
+		return lnrpc.ErrAlreadyInjected
+	}
+
+	cfg, err := getConfig(configRegistry, true)
+	if err != nil {
+		return err
+	}
+
+	s.cfg = cfg
 
 	return nil
 }

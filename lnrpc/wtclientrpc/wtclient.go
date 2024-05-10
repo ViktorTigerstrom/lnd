@@ -9,6 +9,7 @@ import (
 	"net"
 	"sort"
 	"strconv"
+	"sync/atomic"
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
@@ -87,6 +88,8 @@ type ServerShell struct {
 //
 // TODO(wilmer): better name?
 type WatchtowerClient struct {
+	injected int32 // To be used atomically.
+
 	// Required by the grpc-gateway/v2 library for forward compatibility.
 	UnimplementedWatchtowerClientServer
 
@@ -118,6 +121,27 @@ func (c *WatchtowerClient) Start() error {
 //
 // NOTE: This is part of the lnrpc.SubServer interface.
 func (c *WatchtowerClient) Stop() error {
+	return nil
+}
+
+// InjectDependencies populates that the sub-server's dependencies ensures that
+// they have been properly set.
+//
+// NOTE: This is part of the lnrpc.SubServer interface.
+func (c *WatchtowerClient) InjectDependencies(
+	configRegistry lnrpc.SubServerConfigDispatcher) error {
+
+	if atomic.AddInt32(&c.injected, 1) != 1 {
+		return lnrpc.ErrAlreadyInjected
+	}
+
+	cfg, err := getConfig(configRegistry, true)
+	if err != nil {
+		return err
+	}
+
+	c.cfg = *cfg
+
 	return nil
 }
 

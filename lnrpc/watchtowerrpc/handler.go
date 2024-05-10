@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/lightningnetwork/lnd/lnrpc"
@@ -46,6 +47,8 @@ type ServerShell struct {
 // Handler is the RPC server we'll use to interact with the backing active
 // watchtower.
 type Handler struct {
+	injected int32 // To be used atomically.
+
 	// Required by the grpc-gateway/v2 library for forward compatibility.
 	UnimplementedWatchtowerServer
 
@@ -76,6 +79,27 @@ func (c *Handler) Start() error {
 //
 // NOTE: This is part of the lnrpc.SubServer interface.
 func (c *Handler) Stop() error {
+	return nil
+}
+
+// InjectDependencies populates that the sub-server's dependencies ensures that
+// they have been properly set.
+//
+// NOTE: This is part of the lnrpc.SubServer interface.
+func (c *Handler) InjectDependencies(
+	configRegistry lnrpc.SubServerConfigDispatcher) error {
+
+	if atomic.AddInt32(&c.injected, 1) != 1 {
+		return lnrpc.ErrAlreadyInjected
+	}
+
+	cfg, err := getConfig(configRegistry, true)
+	if err != nil {
+		return err
+	}
+
+	c.cfg = *cfg
+
 	return nil
 }
 
