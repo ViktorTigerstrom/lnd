@@ -159,6 +159,10 @@ func TestSignCoordinator_PingResponse(t *testing.T) {
 	require.Equal(t, req.GetRequestId(), uint64(2))
 	require.True(t, req.GetPing())
 
+	require.Len(t, coordinator.responses, 1)
+	_, ok := coordinator.responses[uint64(2)]
+	require.True(t, ok)
+
 	stream.sendResponse(&walletrpc.SignCoordinatorResponse{
 		RequestId: 2,
 		SignResponseType: &walletrpc.SignCoordinatorResponse_Pong{
@@ -194,6 +198,10 @@ func TestSignCoordinator_ConcurrentPingResponses(t *testing.T) {
 	require.Equal(t, req1.GetRequestId(), uint64(2))
 	require.True(t, req1.GetPing())
 
+	require.Len(t, coordinator.responses, 1)
+	_, ok := coordinator.responses[uint64(2)]
+	require.True(t, ok)
+
 	wg.Add(1)
 
 	go func() {
@@ -208,6 +216,10 @@ func TestSignCoordinator_ConcurrentPingResponses(t *testing.T) {
 
 	require.Equal(t, req2.GetRequestId(), uint64(3))
 	require.True(t, req2.GetPing())
+
+	require.Len(t, coordinator.responses, 2)
+	_, ok = coordinator.responses[uint64(3)]
+	require.True(t, ok)
 
 	// Send responses for both Ping requests
 	stream.sendResponse(&walletrpc.SignCoordinatorResponse{
@@ -240,6 +252,10 @@ func TestSignCoordinator_ConcurrentPingResponses(t *testing.T) {
 	require.Equal(t, req3.GetRequestId(), uint64(4))
 	require.True(t, req3.GetPing())
 
+	require.Len(t, coordinator.responses, 1)
+	_, ok = coordinator.responses[uint64(4)]
+	require.True(t, ok)
+
 	wg.Add(1)
 
 	go func() {
@@ -254,6 +270,10 @@ func TestSignCoordinator_ConcurrentPingResponses(t *testing.T) {
 
 	require.Equal(t, req4.GetRequestId(), uint64(5))
 	require.True(t, req4.GetPing())
+
+	require.Len(t, coordinator.responses, 2)
+	_, ok = coordinator.responses[uint64(5)]
+	require.True(t, ok)
 
 	stream.sendResponse(&walletrpc.SignCoordinatorResponse{
 		RequestId: 5,
@@ -332,6 +352,10 @@ func TestSignCoordinator_PingTimeoutByOneRequest(t *testing.T) {
 	require.Equal(t, req1.GetRequestId(), uint64(2))
 	require.True(t, req1.GetPing())
 
+	require.Len(t, coordinator.responses, 1)
+	_, ok := coordinator.responses[uint64(2)]
+	require.True(t, ok)
+
 	wg.Add(1)
 
 	go func() {
@@ -347,7 +371,15 @@ func TestSignCoordinator_PingTimeoutByOneRequest(t *testing.T) {
 	require.Equal(t, req2.GetRequestId(), uint64(3))
 	require.True(t, req2.GetPing())
 
+	require.Len(t, coordinator.responses, 2)
+	_, ok = coordinator.responses[uint64(3)]
+	require.True(t, ok)
+
 	<-timeoutChan
+
+	require.Len(t, coordinator.responses, 1)
+	_, ok = coordinator.responses[uint64(3)]
+	require.True(t, ok)
 
 	// Send responses for both Ping requests
 	stream.sendResponse(&walletrpc.SignCoordinatorResponse{
@@ -387,6 +419,10 @@ func TestSignCoordinator_IncorrectResponseRequestId(t *testing.T) {
 	require.Equal(t, req.GetRequestId(), uint64(2))
 	require.True(t, req.GetPing())
 
+	require.Len(t, coordinator.responses, 1)
+	_, ok := coordinator.responses[uint64(2)]
+	require.True(t, ok)
+
 	stream.sendResponse(&walletrpc.SignCoordinatorResponse{
 		RequestId: 3, // Incorrect request ID
 		SignResponseType: &walletrpc.SignCoordinatorResponse_Pong{
@@ -421,6 +457,10 @@ func TestSignCoordinator_SignerError(t *testing.T) {
 
 	require.Equal(t, req.GetRequestId(), uint64(2))
 	require.True(t, req.GetPing())
+
+	require.Len(t, coordinator.responses, 1)
+	_, ok := coordinator.responses[uint64(2)]
+	require.True(t, ok)
 
 	stream.sendResponse(&walletrpc.SignCoordinatorResponse{
 		RequestId: 2,
@@ -461,6 +501,10 @@ func TestSignCoordinator_StopCoordinator(t *testing.T) {
 
 	require.Equal(t, req.GetRequestId(), uint64(2))
 	require.True(t, req.GetPing())
+
+	require.Len(t, coordinator.responses, 1)
+	_, ok := coordinator.responses[uint64(2)]
+	require.True(t, ok)
 
 	// Stop the coordinator
 	wg.Add(1)
@@ -509,6 +553,10 @@ func TestSignCoordinator_RemoteSignerDisconnects(t *testing.T) {
 
 	require.Equal(t, req.GetRequestId(), uint64(2))
 	require.True(t, req.GetPing())
+
+	require.Len(t, coordinator.responses, 1)
+	_, ok := coordinator.responses[uint64(2)]
+	require.True(t, ok)
 
 	// We simulate that the remote signer disconnects by canceling the
 	// stream.
