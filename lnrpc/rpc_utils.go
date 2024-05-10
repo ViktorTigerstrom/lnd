@@ -55,6 +55,11 @@ var (
 	RESTJsonUnmarshalOpts = &protojson.UnmarshalOptions{
 		AllowPartial: false,
 	}
+
+	// ErrAlreadyInjected is an error that is returned when
+	// dependencies have already been injected into a sub-server.
+	ErrAlreadyInjected = errors.New("dependencies have already been " +
+		"injected")
 )
 
 // RPCTransaction returns a rpc transaction.

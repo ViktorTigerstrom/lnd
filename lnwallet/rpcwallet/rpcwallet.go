@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"crypto/x509"
 	"errors"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -24,19 +22,14 @@ import (
 	basewallet "github.com/btcsuite/btcwallet/wallet"
 	"github.com/lightningnetwork/lnd/input"
 	"github.com/lightningnetwork/lnd/keychain"
-	"github.com/lightningnetwork/lnd/lncfg"
 	"github.com/lightningnetwork/lnd/lnrpc/signrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/walletrpc"
 	"github.com/lightningnetwork/lnd/lnwallet"
 	"github.com/lightningnetwork/lnd/lnwallet/btcwallet"
 	"github.com/lightningnetwork/lnd/lnwallet/chainfee"
 	"github.com/lightningnetwork/lnd/lnwire"
-	"github.com/lightningnetwork/lnd/macaroons"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
-	"gopkg.in/macaroon.v2"
 )
 
 var (
@@ -64,6 +57,8 @@ type RPCKeyRing struct {
 
 	signerClient signrpc.SignerClient
 	walletClient walletrpc.WalletKitClient
+
+	remoteSigner RemoteSigner
 }
 
 var _ keychain.SecretKeyRing = (*RPCKeyRing)(nil)
@@ -76,25 +71,17 @@ var _ lnwallet.WalletController = (*RPCKeyRing)(nil)
 // delegates any signing or ECDH operations to the remove signer through RPC.
 func NewRPCKeyRing(watchOnlyKeyRing keychain.SecretKeyRing,
 	watchOnlyWalletController lnwallet.WalletController,
-	remoteSigner *lncfg.RemoteSigner,
+	remoteSigner RemoteSigner,
 	netParams *chaincfg.Params) (*RPCKeyRing, error) {
-
-	rpcConn, err := connectRPC(
-		remoteSigner.RPCHost, remoteSigner.TLSCertPath,
-		remoteSigner.MacaroonPath, remoteSigner.Timeout,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("error connecting to the remote "+
-			"signing node through RPC: %v", err)
-	}
 
 	return &RPCKeyRing{
 		WalletController: watchOnlyWalletController,
 		watchOnlyKeyRing: watchOnlyKeyRing,
 		netParams:        netParams,
-		rpcTimeout:       remoteSigner.Timeout,
-		signerClient:     signrpc.NewSignerClient(rpcConn),
-		walletClient:     walletrpc.NewWalletKitClient(rpcConn),
+		rpcTimeout:       remoteSigner.Timeout(),
+		signerClient:     remoteSigner,
+		walletClient:     remoteSigner,
+		remoteSigner:     remoteSigner,
 	}, nil
 }
 
@@ -865,6 +852,25 @@ func (r *RPCKeyRing) MuSig2CombineSig(sessionID input.MuSig2SessionID,
 	return finalSig, resp.HaveAllSignatures, nil
 }
 
+// RemoteSigner returns the remote signer instance that is used by the RPC key
+// ring to sign transactions.
+func (r *RPCKeyRing) RemoteSigner() RemoteSigner {
+	return r.remoteSigner
+}
+
+// RequireReady waits until the remote signer is ready to sign transactions, and
+// returns an error if we time out while waiting. This method overrides/shadows
+// the default implementation of the WalletController interface.
+func (r *RPCKeyRing) ReadySignal() chan error {
+	readyChan := make(chan error, 1)
+
+	go func() {
+		readyChan <- r.remoteSigner.Ready()
+	}()
+
+	return readyChan
+}
+
 // MuSig2Cleanup removes a session from memory to free up resources.
 func (r *RPCKeyRing) MuSig2Cleanup(sessionID input.MuSig2SessionID) error {
 	req := &signrpc.MuSig2CleanupRequest{
@@ -1252,56 +1258,6 @@ func extractSignature(in *psbt.PInput,
 		return nil, fmt.Errorf("can't extract signature, unsupported "+
 			"signing method: %v", signMethod)
 	}
-}
-
-// connectRPC tries to establish an RPC connection to the given host:port with
-// the supplied certificate and macaroon.
-func connectRPC(hostPort, tlsCertPath, macaroonPath string,
-	timeout time.Duration) (*grpc.ClientConn, error) {
-
-	certBytes, err := os.ReadFile(tlsCertPath)
-	if err != nil {
-		return nil, fmt.Errorf("error reading TLS cert file %v: %w",
-			tlsCertPath, err)
-	}
-
-	cp := x509.NewCertPool()
-	if !cp.AppendCertsFromPEM(certBytes) {
-		return nil, fmt.Errorf("credentials: failed to append " +
-			"certificate")
-	}
-
-	macBytes, err := os.ReadFile(macaroonPath)
-	if err != nil {
-		return nil, fmt.Errorf("error reading macaroon file %v: %w",
-			macaroonPath, err)
-	}
-	mac := &macaroon.Macaroon{}
-	if err := mac.UnmarshalBinary(macBytes); err != nil {
-		return nil, fmt.Errorf("error decoding macaroon: %w", err)
-	}
-
-	macCred, err := macaroons.NewMacaroonCredential(mac)
-	if err != nil {
-		return nil, fmt.Errorf("error creating creds: %w", err)
-	}
-
-	opts := []grpc.DialOption{
-		grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(
-			cp, "",
-		)),
-		grpc.WithPerRPCCredentials(macCred),
-		grpc.WithBlock(),
-	}
-	ctxt, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	conn, err := grpc.DialContext(ctxt, hostPort, opts...)
-	if err != nil {
-		return nil, fmt.Errorf("unable to connect to RPC server: %w",
-			err)
-	}
-
-	return conn, nil
 }
 
 // packetFromTx creates a PSBT from a tx that potentially already contains
