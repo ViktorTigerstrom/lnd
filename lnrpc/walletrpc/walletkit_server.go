@@ -184,6 +184,15 @@ var (
 		"/walletrpc.WalletKit/SignCoordinatorStreams": {{
 			Entity: "onchain",
 			Action: "write",
+		}, {
+			Entity: "message",
+			Action: "write",
+		}, {
+			Entity: "signer",
+			Action: "generate",
+		}, {
+			Entity: "address",
+			Action: "read",
 		}},
 	}
 
@@ -528,8 +537,8 @@ type RemoteSigner interface {
 	Run(stream WalletKit_SignCoordinatorStreamsServer) error
 }
 
-// This get's triggered when a client connects. Can get triggered multiple
-// times.
+// SignCoordinatorStreams opens a bi-directional streaming RPC, which is used
+// to allow remote signer to process sign requests on behalf of the wallet.
 func (w *WalletKit) SignCoordinatorStreams(
 	stream WalletKit_SignCoordinatorStreamsServer) error {
 
@@ -564,7 +573,12 @@ func (w *WalletKit) SignCoordinatorStreams(
 	// InjectDependencies function while the stream is still open.
 	w.RUnlock()
 
-	return signer.Run(stream)
+	err := signer.Run(stream)
+	if err != nil {
+		log.Errorf("Remote signer stream error: %v", err)
+	}
+
+	return err
 }
 
 // LeaseOutput locks an output to the given ID, preventing it from being
