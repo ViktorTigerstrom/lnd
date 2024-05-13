@@ -34,8 +34,11 @@ type SubServer interface {
 	Name() string
 
 	// InjectDependencies populates the sub-server's dependencies using the
-	// passed SubServerConfigDispatcher.
-	InjectDependencies(subCfgs SubServerConfigDispatcher) error
+	// passed SubServerConfigDispatcher. If the finalizeDependencies boolean
+	// is true, then the sub-server should finalize its dependencies and
+	// return an error if any required dependencies are missing.
+	InjectDependencies(subCfgs SubServerConfigDispatcher,
+		finalizeDependencies bool) error
 }
 
 // GrpcHandler is the interface that should be registered with the root gRPC
@@ -59,11 +62,8 @@ type GrpcHandler interface {
 
 	// CreateSubServer creates an instance of the sub-server, and returns
 	// the macaroon permissions that the sub-server wishes to pass on to the
-	// root server for all methods routed towards it. The function may
-	// populate the sub-server's dependencies using the
-	// passed SubServerConfigDispatcher.
-	CreateSubServer(subCfgs SubServerConfigDispatcher) (SubServer,
-		MacaroonPerms, error)
+	// root server for all methods routed towards it.
+	CreateSubServer() (SubServer, MacaroonPerms, error)
 }
 
 // SubServerConfigDispatcher is an interface that all sub-servers will use to

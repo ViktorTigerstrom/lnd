@@ -185,6 +185,7 @@ var _ RouterServer = (*Server)(nil)
 // of this documentation, this is the same macaroon as as the admin macaroon.
 func New() (*Server, lnrpc.MacaroonPerms, error) {
 	routerServer := &Server{
+		cfg:  &Config{},
 		quit: make(chan struct{}),
 	}
 
@@ -214,20 +215,28 @@ func (s *Server) Stop() error {
 	return nil
 }
 
-// InjectDependencies populates that the sub-server's dependencies ensures that
-// they have been properly set.
+// InjectDependencies populates the sub-server's dependencies. If the
+// finalizeDependencies boolean is true, then the sub-server will finalize its
+// dependencies and return an error if any required dependencies are missing.
 //
 // NOTE: This is part of the lnrpc.SubServer interface.
 func (s *Server) InjectDependencies(
-	configRegistry lnrpc.SubServerConfigDispatcher) error {
+	configRegistry lnrpc.SubServerConfigDispatcher,
+	finalizeDependencies bool) error {
 
-	if atomic.AddInt32(&s.injected, 1) != 1 {
-		return lnrpc.ErrAlreadyInjected
+	if finalizeDependencies && atomic.AddInt32(&s.injected, 1) != 1 {
+		return lnrpc.ErrDependenciesFinalized
 	}
 
-	cfg, err := getConfig(configRegistry)
+	cfg, err := getConfig(configRegistry, finalizeDependencies)
 	if err != nil {
 		return err
+	}
+
+	if finalizeDependencies {
+		s.cfg = cfg
+
+		return nil
 	}
 
 	// If the path of the router macaroon wasn't generated, then we'll
@@ -325,7 +334,7 @@ func (r *ServerShell) RegisterWithRestServer(ctx context.Context,
 // for all methods routed towards it.
 //
 // NOTE: This is part of the lnrpc.GrpcHandler interface.
-func (r *ServerShell) CreateSubServer(configRegistry lnrpc.SubServerConfigDispatcher) (
+func (r *ServerShell) CreateSubServer() (
 	lnrpc.SubServer, lnrpc.MacaroonPerms, error) {
 
 	subServer, macPermissions, err := New()

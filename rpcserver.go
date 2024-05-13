@@ -663,14 +663,36 @@ func newRPCServer(cfg *Config, interceptorChain *rpcperms.InterceptorChain,
 
 // prepareSubServers prepares the sub-servers to be started. The function
 // populates the wallet sub-server configuration with the remote signer values,
-// and insert the permissions required to access them into the interceptor chain.
+// and insert the permissions required to access them into the interceptor
+// chain.
 func (r *rpcServer) prepareSubServers(macService *macaroons.Service,
 	subServerCgs *subRPCServerConfigs, cc *chainreg.ChainControl) error {
 
 	var (
 		subServers     []lnrpc.SubServer
 		subServerPerms []lnrpc.MacaroonPerms
+		injectSubs     []lnrpc.SubServer
 	)
+
+	// Create all of the sub-servers. Note that we do not yet have all
+	// dependencies required to use all sub-servers, as they are injected
+	// in the addDeps function, after all sub-servers have been started.
+	for _, subServerInstance := range r.subGrpcHandlers {
+		subServer, macPerms, err := subServerInstance.CreateSubServer()
+		if err != nil {
+			return err
+		}
+
+		// We'll collect the sub-server, and also the set of
+		// permissions it needs for macaroons so we can apply the
+		// interceptors below.
+		subServers = append(subServers, subServer)
+		subServerPerms = append(subServerPerms, macPerms)
+
+		if subServer.Name() == walletrpc.SubServerName {
+			injectSubs = append(injectSubs, subServer)
+		}
+	}
 
 	// We need to populate the wallet sub-server configuration with the
 	// remote signer values, prior to the other sub-servers, as we need the
@@ -681,22 +703,15 @@ func (r *rpcServer) prepareSubServers(macService *macaroons.Service,
 		return err
 	}
 
-	// Now create all of the sub-servers. Note that we do not yet have all
-	// dependencies required to use all sub-servers, as they are injected
-	// in the addDeps function, after all sub-servers have been started.
-	for _, subServerInstance := range r.subGrpcHandlers {
-		subServer, macPerms, err := subServerInstance.CreateSubServer(
-			subServerCgs,
-		)
+	// We'll now inject the dependencies into the sub-servers, which are
+	// needed during the start-up of the main rpc-server. Note that the
+	// dependencies are not yet finalized, as more dependencies will be
+	// injected in later in the addDeps function, when those are ready.
+	for _, subServer := range injectSubs {
+		err := subServer.InjectDependencies(subServerCgs, false)
 		if err != nil {
 			return err
 		}
-
-		// We'll collect the sub-server, and also the set of
-		// permissions it needs for macaroons so we can apply the
-		// interceptors below.
-		subServers = append(subServers, subServer)
-		subServerPerms = append(subServerPerms, macPerms)
 	}
 
 	// Next, we need to merge the set of sub server macaroon permissions
@@ -855,7 +870,7 @@ func (r *rpcServer) addDeps(s *server, macService *macaroons.Service,
 	// ensures that all dependencies are properly set within each sub-server
 	// configuration struct.
 	for _, subServer := range r.subServers {
-		err = subServer.InjectDependencies(subServerCgs)
+		err = subServer.InjectDependencies(subServerCgs, true)
 		if err != nil {
 			return err
 		}

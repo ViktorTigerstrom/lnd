@@ -47,11 +47,13 @@ func (s *Server) Stop() error {
 	return nil
 }
 
-// InjectDependencies populates that the sub-server's dependencies ensures that
-// they have been properly set.
+// InjectDependencies populates the sub-server's dependencies. If the
+// finalizeDependencies boolean is true, then the sub-server will finalize its
+// dependencies and return an error if any required dependencies are missing.
 //
 // NOTE: This is part of the lnrpc.SubServer interface.
-func (s *Server) InjectDependencies(_ lnrpc.SubServerConfigDispatcher) error {
+func (s *Server) InjectDependencies(_ lnrpc.SubServerConfigDispatcher,
+	_ bool) error {
 	// There are no specific dependencies to populate for this subServer.
 	return nil
 }
@@ -105,7 +107,7 @@ func (r *ServerShell) RegisterWithRestServer(ctx context.Context,
 // for all methods routed towards it.
 //
 // NOTE: This is part of the lnrpc.GrpcHandler interface.
-func (r *ServerShell) CreateSubServer(_ lnrpc.SubServerConfigDispatcher) (
+func (r *ServerShell) CreateSubServer() (
 	lnrpc.SubServer, lnrpc.MacaroonPerms, error) {
 
 	subServer := &Server{}

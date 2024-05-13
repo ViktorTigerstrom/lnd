@@ -101,7 +101,7 @@ var _ NeutrinoKitServer = (*Server)(nil)
 func New() (*Server, lnrpc.MacaroonPerms, error) {
 	// We don't create any new macaroons for this subserver, instead reuse
 	// existing onchain/offchain permissions.
-	return &Server{}, macPermissions, nil
+	return &Server{cfg: &Config{}}, macPermissions, nil
 }
 
 // Start launches any helper goroutines required for the Server to function.
@@ -118,18 +118,20 @@ func (s *Server) Stop() error {
 	return nil
 }
 
-// InjectDependencies populates that the sub-server's dependencies ensures that
-// they have been properly set.
+// InjectDependencies populates the sub-server's dependencies. If the
+// finalizeDependencies boolean is true, then the sub-server will finalize its
+// dependencies and return an error if any required dependencies are missing.
 //
 // NOTE: This is part of the lnrpc.SubServer interface.
 func (s *Server) InjectDependencies(
-	configRegistry lnrpc.SubServerConfigDispatcher) error {
+	configRegistry lnrpc.SubServerConfigDispatcher,
+	finalizeDependencies bool) error {
 
-	if atomic.AddInt32(&s.injected, 1) != 1 {
-		return lnrpc.ErrAlreadyInjected
+	if finalizeDependencies && atomic.AddInt32(&s.injected, 1) != 1 {
+		return lnrpc.ErrDependenciesFinalized
 	}
 
-	config, err := getConfig(configRegistry)
+	config, err := getConfig(configRegistry, finalizeDependencies)
 	if err != nil {
 		return err
 	}
@@ -191,7 +193,7 @@ func (r *ServerShell) RegisterWithRestServer(ctx context.Context,
 // for all methods routed towards it.
 //
 // NOTE: This is part of the lnrpc.GrpcHandler interface.
-func (r *ServerShell) CreateSubServer(configRegistry lnrpc.SubServerConfigDispatcher) (
+func (r *ServerShell) CreateSubServer() (
 	lnrpc.SubServer, lnrpc.MacaroonPerms, error) {
 
 	subServer, macPermissions, err := New()

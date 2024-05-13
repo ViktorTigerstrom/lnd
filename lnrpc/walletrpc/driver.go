@@ -9,21 +9,6 @@ import (
 	"github.com/lightningnetwork/lnd/lnrpc"
 )
 
-// createNewSubServer is a helper method that will create the new WalletKit RPC
-// sub server given the main config dispatcher method. If we're unable to find
-// the config that is meant for us in the config dispatcher, then we'll exit
-// with an error.
-func createNewSubServer(configRegistry lnrpc.SubServerConfigDispatcher) (
-	*WalletKit, lnrpc.MacaroonPerms, error) {
-
-	config, err := getConfig(configRegistry, false)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return New(config)
-}
-
 // getConfig is a helper method that will fetch the config for sub-server given
 // the main config dispatcher method. If we're unable to find the config
 // that is meant for us in the config dispatcher, then we'll exit with an
@@ -59,6 +44,8 @@ func getConfig(configRegistry lnrpc.SubServerConfigDispatcher,
 	return config, nil
 }
 
+// verifyDependencies ensures that the dependencies in the config are properly
+// set.
 func verifyDependencies(config *Config) error {
 	// Before we try to make the new WalletKit service instance, we'll
 	// perform some sanity checks on the arguments to ensure that they're

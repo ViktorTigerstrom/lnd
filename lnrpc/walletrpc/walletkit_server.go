@@ -272,9 +272,9 @@ type WalletKit struct {
 var _ WalletKitServer = (*WalletKit)(nil)
 
 // New creates a new instance of the WalletKit sub-RPC server.
-func New(cfg *Config) (*WalletKit, lnrpc.MacaroonPerms, error) {
+func New() (*WalletKit, lnrpc.MacaroonPerms, error) {
 	walletKit := &WalletKit{
-		cfg:  cfg,
+		cfg:  &Config{},
 		quit: make(chan struct{}),
 	}
 
@@ -297,23 +297,31 @@ func (w *WalletKit) Stop() error {
 	return nil
 }
 
-// InjectDependencies populates that the sub-server's dependencies ensures that
-// they have been properly set.
+// InjectDependencies populates the sub-server's dependencies. If the
+// finalizeDependencies boolean is true, then the sub-server will finalize its
+// dependencies and return an error if any required dependencies are missing.
 //
 // NOTE: This is part of the lnrpc.SubServer interface.
 func (w *WalletKit) InjectDependencies(
-	configRegistry lnrpc.SubServerConfigDispatcher) error {
+	configRegistry lnrpc.SubServerConfigDispatcher,
+	finalizeDependencies bool) error {
 
-	if atomic.AddInt32(&w.injected, 1) != 1 {
-		return lnrpc.ErrAlreadyInjected
+	if finalizeDependencies && atomic.AddInt32(&w.injected, 1) != 1 {
+		return lnrpc.ErrDependenciesFinalized
 	}
 
 	w.Lock()
 	defer w.Unlock()
 
-	cfg, err := getConfig(configRegistry, true)
+	cfg, err := getConfig(configRegistry, finalizeDependencies)
 	if err != nil {
 		return err
+	}
+
+	if finalizeDependencies {
+		w.cfg = cfg
+
+		return nil
 	}
 
 	// If the path of the wallet kit macaroon wasn't specified, then we'll
@@ -409,16 +417,12 @@ func (r *ServerShell) RegisterWithRestServer(ctx context.Context,
 // CreateSubServer creates an instance of the sub-server, and returns the
 // macaroon permissions that the sub-server wishes to pass on to the root server
 // for all methods routed towards it.
-// As we need the remote signer values of the config if a remote signer is
-// used, the function partly populates the sub-server's dependencies.
-// Specifically the remote signer values are set using the passed
-// SubServerConfigDispatcher.
 //
 // NOTE: This is part of the lnrpc.GrpcHandler interface.
-func (r *ServerShell) CreateSubServer(configRegistry lnrpc.SubServerConfigDispatcher) (
+func (r *ServerShell) CreateSubServer() (
 	lnrpc.SubServer, lnrpc.MacaroonPerms, error) {
 
-	subServer, macPermissions, err := createNewSubServer(configRegistry)
+	subServer, macPermissions, err := New()
 	if err != nil {
 		return nil, nil, err
 	}

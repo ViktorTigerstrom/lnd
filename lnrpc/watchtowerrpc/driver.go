@@ -12,11 +12,10 @@ import (
 // getConfig is a helper method that will fetch the config for sub-server given
 // the main config dispatcher method. If we're unable to find the config
 // that is meant for us in the config dispatcher, then we'll exit with an
-// error. The function also verifies that the dependencies in the config are
-// properly set.
-func getConfig(configRegistry lnrpc.SubServerConfigDispatcher) (*Config,
-	error) {
-
+// error. If enforceDependencies is set to true, the function also verifies that
+// the dependencies in the config are properly set.
+func getConfig(configRegistry lnrpc.SubServerConfigDispatcher,
+	enforceDependencies bool) (*Config, error) {
 	// We'll attempt to look up the config that we expect, according to our
 	// subServerName name. If we can't find this, then we'll exit with an
 	// error, as we're unable to properly initialize ourselves without this
@@ -36,8 +35,10 @@ func getConfig(configRegistry lnrpc.SubServerConfigDispatcher) (*Config,
 			subServerConf)
 	}
 
-	if err := verifyDependencies(config); err != nil {
-		return nil, err
+	if enforceDependencies {
+		if err := verifyDependencies(config); err != nil {
+			return nil, err
+		}
 	}
 
 	return config, nil
@@ -45,7 +46,7 @@ func getConfig(configRegistry lnrpc.SubServerConfigDispatcher) (*Config,
 
 // verifyDependencies ensures that the dependencies in the config are properly
 // set.
-func verifyDependencies(_ *Config) error {
+func verifyDependencies(config *Config) error {
 	return nil
 }
 
