@@ -38,6 +38,8 @@ func (b *RemoteSignerBuilder) Build() (RemoteSigner, func(), error) {
 	switch b.cfg.SignerType {
 	case lncfg.DefaultInboundRemoteSignerType:
 		return b.createInboundRemoteSigner()
+	case lncfg.OutboundRemoteSignerType:
+		return b.createOutboundRemoteSigner()
 	default:
 		return nil, nil, errors.New("unknown remote signer type")
 	}
@@ -54,4 +56,18 @@ func (b *RemoteSignerBuilder) createInboundRemoteSigner() (
 		b.cfg.RPCHost, b.cfg.TLSCertPath, b.cfg.MacaroonPath,
 		b.cfg.Timeout,
 	)
+}
+
+// createOutboundRemoteSigner creates a new OutboundRemoteSigner instance.
+// The function returns the created OutboundRemoteSigner instance, and a cleanup
+// function that should be called when the OutboundRemoteSigner is no longer
+// needed.
+func (b *RemoteSignerBuilder) createOutboundRemoteSigner() (
+	*OutboundRemoteSigner, func(), error) {
+
+	outboundRemoteSigner, cleanUp := NewOutboundRemoteSigner(
+		b.cfg.RequestTimeout, b.cfg.Timeout,
+	)
+
+	return outboundRemoteSigner, cleanUp, nil
 }
