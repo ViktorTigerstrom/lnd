@@ -485,6 +485,31 @@ func (w *WalletKit) ListUnspent(ctx context.Context,
 	}, nil
 }
 
+// RemoteSigner is an interface that mimics the rpcwallet RemoteSigner interface
+// to avoid circular dependencies.
+type RemoteSigner interface {
+	// RemoteSigner extends the signrpc.SignerClient
+	signrpc.SignerClient
+
+	// RemoteSigner extends the walletrpc.WalletKitClient
+	WalletKitClient
+
+	// Timeout returns the set connection timeout for the remote signer.
+	Timeout() time.Duration
+
+	// Ready blocks returns nil when the remote signer is ready to accept
+	// requests.
+	Ready() error
+
+	// Ping verifies that the remote signer is still responsive.
+	Ping(timeout time.Duration) error
+
+	// Run feeds lnd with the incoming stream that an outbound remote signer
+	// has set up, and then blocks until the stream is closed. Lnd can then
+	// proceed to send any requests to the remote signer through the stream.
+	Run(stream WalletKit_SignCoordinatorStreamsServer) error
+}
+
 // SignCoordinatorStreams opens a bi-directional streaming RPC, which is used
 // to allow remote signer to process sign requests on behalf of the wallet.
 func (w *WalletKit) SignCoordinatorStreams(
