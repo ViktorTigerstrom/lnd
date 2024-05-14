@@ -35,6 +35,7 @@ import (
 	"github.com/lightningnetwork/lnd/input"
 	"github.com/lightningnetwork/lnd/keychain"
 	"github.com/lightningnetwork/lnd/labels"
+	"github.com/lightningnetwork/lnd/lncfg"
 	"github.com/lightningnetwork/lnd/lnrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/signrpc"
 	"github.com/lightningnetwork/lnd/lnwallet"
@@ -515,7 +516,33 @@ type RemoteSigner interface {
 func (w *WalletKit) SignCoordinatorStreams(
 	stream WalletKit_SignCoordinatorStreamsServer) error {
 
-	return fmt.Errorf("Unimplemented")
+	// Check that the user actually has configured that the reverse remote
+	// signer functionality should be enabled.
+	if !w.cfg.RemoteSignerConfig.Enable {
+
+		return fmt.Errorf("Reverse remote signer not enabled in config")
+	}
+
+	if w.cfg.RemoteSigner == nil {
+
+		return fmt.Errorf("remote signer not set in config")
+	}
+
+	if w.cfg.RemoteSignerConfig.SignerType !=
+		lncfg.OutboundRemoteSignerType {
+
+		return fmt.Errorf("lnd hasn't been configured to use an " +
+			"outbound remote signer")
+	}
+
+	signer := w.cfg.RemoteSigner
+
+	err := signer.Run(stream)
+	if err != nil {
+		log.Errorf("Remote signer stream error: %v", err)
+	}
+
+	return err
 }
 
 // LeaseOutput locks an output to the given ID, preventing it from being
