@@ -55,11 +55,6 @@ type RemoteSigner struct {
 
 // Validate checks the values configured for our remote RPC signer.
 func (r *RemoteSigner) Validate() error {
-	if r.SignerRole == OutboundWatchOnlyRole {
-		return fmt.Errorf("remote signer: the set signerrole \"%v\" "+
-			"is not yet supported", r.SignerRole)
-	}
-
 	if r.Timeout < time.Millisecond {
 		return fmt.Errorf("remote signer: timeout of %v is invalid, "+
 			"cannot be smaller than %v", r.Timeout,
