@@ -1648,11 +1648,13 @@ var releaseOutputCommand = cli.Command{
 }
 
 func releaseOutput(ctx *cli.Context) error {
+
+	return fmt.Errorf("WORKS!!!!")
 	ctxc := getContext()
 
 	// Display the command's help message if we do not have the expected
 	// number of arguments/flags.
-	if ctx.NArg() != 1 && ctx.NumFlags() != 1 {
+	if ctx.NArg() > 20 && ctx.NumFlags() > 20 {
 		return cli.ShowCommandHelp(ctx, "releaseoutput")
 	}
 
