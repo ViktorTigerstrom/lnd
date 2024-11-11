@@ -86,6 +86,12 @@ var (
 	ErrRPCStarting = fmt.Errorf("the RPC server is in the process of " +
 		"starting up, but not yet ready to accept calls")
 
+	// ErrRemoteSignerMode is returned if an RPC method is called that isn't
+	// whitelisted in the remoteSignerWhitelist, i.e. not allowed while the
+	// node acts as a remote signer.
+	ErrRemoteSignerMode = fmt.Errorf("the RPC method cannot be called " +
+		"when the node acts a remote signer")
+
 	// macaroonWhitelist defines methods that we don't require macaroons to
 	// access. We also allow these methods to be called even if not all
 	// mandatory middlewares are registered yet. If the wallet is locked
@@ -104,6 +110,42 @@ var (
 		// before we can check macaroons, so we whitelist it.
 		"/lnrpc.State/SubscribeState": {},
 		"/lnrpc.State/GetState":       {},
+	}
+
+	// remoteSignerWhitelist specifies the methods allowed when the node
+	// functions as a remote signer.
+	remoteSignerWhitelist = map[string]struct{}{
+		// Direct remote signing methods
+		"/walletrpc.WalletKit/SignCoordinatorStreams": {},
+		"/walletrpc.WalletKit/SignPsbt":               {},
+		"/signrpc.Signer/DeriveSharedKey":             {},
+		"/signrpc.Signer/MuSig2Cleanup":               {},
+		"/signrpc.Signer/MuSig2CombineSig":            {},
+		"/signrpc.Signer/MuSig2CreateSession":         {},
+		"/signrpc.Signer/MuSig2RegisterNonces":        {},
+		"/signrpc.Signer/MuSig2Sign":                  {},
+		"/signrpc.Signer/SignMessage":                 {},
+		// Standard methods
+		"/lnrpc.Lightning/GetInfo":        {},
+		"/lnrpc.Lightning/StopDaemon":     {},
+		"/verrpc.Versioner/GetVersion":    {},
+		"/lnrpc.Lightning/DebugLevel":     {},
+		"/lnrpc.Lightning/GetDebugInfo":   {},
+		"/lnrpc.Lightning/GetNetworkInfo": {},
+		// Macaroon methods
+		"/lnrpc.Lightning/BakeMacaroon":             {},
+		"/lnrpc.Lightning/ListMacaroonIDs":          {},
+		"/lnrpc.Lightning/DeleteMacaroonID":         {},
+		"/lnrpc.Lightning/ListPermissions":          {},
+		"/lnrpc.Lightning/CheckMacaroonPermissions": {},
+
+		"/walletrpc.WalletKit/ListAccounts":  {},
+		"/walletrpc.WalletKit/ListAddresses": {},
+
+		"/lnrpc.Lightning/NewAddress":    {},
+		"/lnrpc.Lightning/VerifyMessage": {},
+
+		lnrpc.RegisterRPCMiddlewareURI: {},
 	}
 
 	// allowRemoteSignerWhitelist defines methods that we allow to be called
@@ -175,6 +217,9 @@ type InterceptorChain struct {
 	// noMacaroons should be set true if we don't want to check macaroons.
 	noMacaroons bool
 
+	// remoteSignerMode should be set true if lnd acts as a remote signer.
+	remoteSignerMode bool
+
 	// svc is the macaroon service used to enforce permissions in case
 	// macaroons are used.
 	svc *macaroons.Service
@@ -216,13 +261,14 @@ type InterceptorChain struct {
 var _ lnrpc.StateServer = (*InterceptorChain)(nil)
 
 // NewInterceptorChain creates a new InterceptorChain.
-func NewInterceptorChain(log btclog.Logger, noMacaroons bool,
+func NewInterceptorChain(log btclog.Logger, noMacaroons bool, remoteSigner bool,
 	mandatoryMiddleware []string) *InterceptorChain {
 
 	return &InterceptorChain{
 		state:                     waitingToStart,
 		ntfnServer:                subscribe.NewServer(),
 		noMacaroons:               noMacaroons,
+		remoteSignerMode:          remoteSigner,
 		permissionMap:             make(map[string][]bakery.Op),
 		rpcsLog:                   log,
 		registeredMiddlewareNames: make(map[string]int),
@@ -806,6 +852,15 @@ func (r *InterceptorChain) checkRPCState(srv interface{},
 		_, ok := srv.(lnrpc.WalletUnlockerServer)
 		if ok {
 			return ErrWalletUnlocked
+		}
+
+		if r.remoteSignerMode {
+			// As we only allow certain calls to the remote signer,
+			// as only limited functionality is required.
+			_, ok = remoteSignerWhitelist[fullMethod]
+			if !ok {
+				return ErrRemoteSignerMode
+			}
 		}
 
 	default:

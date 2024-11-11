@@ -191,6 +191,7 @@ required Go version ($goversion)."
     green " - Building: ${os} ${arch} ${arm} with build tags '${buildtags}'"
     env GOEXPERIMENT=loopvar CGO_ENABLED=0 GOOS=$os GOARCH=$arch GOARM=$arm go build -v -trimpath -ldflags="${ldflags}" -tags="${buildtags}" ${PKG}/cmd/lnd
     env GOEXPERIMENT=loopvar CGO_ENABLED=0 GOOS=$os GOARCH=$arch GOARM=$arm go build -v -trimpath -ldflags="${ldflags}" -tags="${buildtags}" ${PKG}/cmd/lncli
+    env GOEXPERIMENT=loopvar CGO_ENABLED=0 GOOS=$os GOARCH=$arch GOARM=$arm go build -v -trimpath -ldflags="${ldflags}" -tags="${buildtags}" ${PKG}/cmd/lndsigner
     popd
 
     # Add the hashes for the individual binaries as well for easy verification

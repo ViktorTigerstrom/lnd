@@ -318,10 +318,19 @@ func Main(cfg *Config, lisCfg ListenerCfg, implCfg *ImplementationCfg,
 		}
 	}
 
+	var remoteSignerMode bool
+
+	if cfg.RemoteSigner.SignerRole == lncfg.InboundSignerRole ||
+		cfg.RemoteSigner.SignerRole == lncfg.OutboundSignerRole {
+
+		remoteSignerMode = true
+	}
+
 	// Create a new RPC interceptor that we'll add to the GRPC server. This
 	// will be used to log the API calls invoked on the GRPC server.
 	interceptorChain := rpcperms.NewInterceptorChain(
-		rpcsLog, cfg.NoMacaroons, cfg.RPCMiddleware.Mandatory,
+		rpcsLog, cfg.NoMacaroons, remoteSignerMode,
+		cfg.RPCMiddleware.Mandatory,
 	)
 	if err := interceptorChain.Start(); err != nil {
 		return mkErr("error starting interceptor chain: %v", err)

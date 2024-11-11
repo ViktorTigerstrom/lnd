@@ -244,6 +244,7 @@ const (
 	bitcoindBackendName = "bitcoind"
 	btcdBackendName     = "btcd"
 	neutrinoBackendName = "neutrino"
+	noChainBackendName  = "nochainbackend"
 )
 
 var (
@@ -258,6 +259,10 @@ var (
 	// DefaultConfigFile is the default full path of lnd's configuration
 	// file.
 	DefaultConfigFile = filepath.Join(DefaultLndDir, lncfg.DefaultConfigFilename)
+
+	// DefaultSignerConfigFile is the default full path of lndsigner's
+	// configuration file.
+	DefaultSignerConfigFile = filepath.Join(DefaultLndDir, lncfg.DefaultSignerConfigFilename)
 
 	defaultDataDir = filepath.Join(DefaultLndDir, defaultDataDirname)
 	defaultLogDir  = filepath.Join(DefaultLndDir, defaultLogDirname)
@@ -741,6 +746,61 @@ func DefaultConfig() Config {
 	}
 }
 
+type SignerConfig struct {
+	ShowVersion bool `short:"V" long:"version" description:"Display version information and exit"`
+
+	LndDir     string `long:"lnddir" description:"The base directory that contains lnd's data, logs, configuration file, etc. This option overwrites all other directory options."`
+	ConfigFile string `short:"C" long:"configfile" description:"Path to configuration file"`
+	DataDir    string `short:"b" long:"datadir" description:"The directory to store lnd's data within"`
+
+	LogDir         string `long:"logdir" description:"Directory to log output."`
+	MaxLogFiles    int    `long:"maxlogfiles" description:"Maximum logfiles to keep (0 for no rotation). DEPRECATED: use --logging.file.max-files instead" hidden:"true"`
+	MaxLogFileSize int    `long:"maxlogfilesize" description:"Maximum logfile size in MB. DEPRECATED: use --logging.file.max-file-size instead" hidden:"true"`
+
+	TLSCertPath string `long:"tlscertpath" description:"Path to write the TLS certificate for lnd's RPC and REST services"`
+	TLSKeyPath  string `long:"tlskeypath" description:"Path to write the TLS private key for lnd's RPC and REST services"`
+
+	RawRPCListeners  []string `long:"rpclisten" description:"Add an interface/port/socket to listen for RPC connections"`
+	RawRESTListeners []string `long:"restlisten" description:"Add an interface/port/socket to listen for REST connections"`
+	RawListeners     []string `long:"listen" description:"Add an interface/port to listen for peer connections"`
+
+	DebugLevel string `short:"d" long:"debuglevel" description:"Logging level for all subsystems {trace, debug, info, warn, error, critical} -- You may also specify <global-level>,<subsystem>=<level>,<subsystem2>=<level>,... to set the log level for individual subsystems -- Use show to list available subsystems"`
+
+	Network string `long:"network" description:"The network the UI and all its components run on" choice:"regtest" choice:"testnet3" choice:"mainnet" choice:"simnet" choice:"signet"`
+
+	Pprof *lncfg.Pprof `group:"Pprof" namespace:"pprof"`
+
+	RPCMiddleware *lncfg.RPCMiddleware `group:"rpcmiddleware" namespace:"rpcmiddleware"`
+
+	SignerRole            string        `long:"signerrole" description:"Sets the type of remote signer the node will act as a remote signer. Can be set to either 'signer-outbound' or 'signer-inbound' (default). 'signer-outbound' means the lnd instance will act as a remote signer, making an outbound connection to a watch-only node with the 'watchonly-outbound' signerrole set. 'signer-inbound' means that the lnd instance will act as an inbound remote signer, which allows a watch-only node to connect which has the 'watchonly-inbound' signer role set" choice:"signer-outbound" choice:"signer-inbound"`
+	WatchOnlyRPCHost      string        `long:"watchonlyrpchost" description:"Sets the watch-only node's RPC host:port. This option should only be set if the signerrole is set to 'signer-outbound'"`
+	WatchOnlyMacaroonPath string        `long:"watchonlymacaroonpath" description:"This param should be set to the watch-only node's macaroon path. This option should only be set if the signerrole is set to 'signer-outbound'"`
+	WatchOnlyTLSCertPath  string        `long:"watchonlytlscertpath" description:"This param should be set to the watch-only node's TLS certificate path. This option should only be set if the signerrole is set to 'signer-outbound'"`
+	Timeout               time.Duration `long:"timeout" description:"The timeout when setting up a connect with the watch-only node. Valid time units are {s, m, h}"`
+	RequestTimeout        time.Duration `long:"requesttimeout" description:"The time we will wait when making requests to the watch-only node. Valid time units are {s, m, h}."`
+}
+
+func DefaultSignerConfig() SignerConfig {
+	return SignerConfig{
+		LndDir:         DefaultLndDir,
+		ConfigFile:     DefaultSignerConfigFile,
+		DataDir:        defaultDataDir,
+		DebugLevel:     defaultLogLevel,
+		TLSCertPath:    defaultTLSCertPath,
+		TLSKeyPath:     defaultTLSKeyPath,
+		LogDir:         defaultLogDir,
+		MaxLogFiles:    build.DefaultMaxLogFiles,
+		MaxLogFileSize: build.DefaultMaxLogFileSize,
+		RPCMiddleware:  lncfg.DefaultRPCMiddleware(),
+
+		Network: chainreg.BitcoinMainNetParams.Params.Name,
+
+		SignerRole:     lncfg.InboundSignerRole,
+		Timeout:        lncfg.DefaultRemoteSignerRPCTimeout,
+		RequestTimeout: lncfg.DefaultRequestTimeout,
+	}
+}
+
 // LoadConfig initializes and parses the config using a config file and command
 // line options.
 //
@@ -750,9 +810,135 @@ func DefaultConfig() Config {
 //  3. Load configuration file overwriting defaults with any specified options
 //  4. Parse CLI options and overwrite/add any specified options
 func LoadConfig(interceptor signal.Interceptor) (*Config, error) {
+	mergeConf := func(cfg *Config) (*Config, error) {
+		return cfg, nil
+	}
+
+	getShowVersion := func(cfg *Config) bool {
+		return cfg.ShowVersion
+	}
+
+	getLndDir := func(cfg *Config) string {
+		return cfg.LndDir
+	}
+
+	getConfigPath := func(cfg *Config) string {
+		return cfg.ConfigFile
+	}
+
+	preCfg := DefaultConfig()
+
+	cfg, err := generalizedConfigLoader(
+		interceptor, preCfg, mergeConf, getShowVersion, getLndDir,
+		getConfigPath, DefaultConfigFile, lncfg.DefaultConfigFilename,
+	)
+
+	return cfg, err
+}
+
+// LoadSignerConfig initializes and parses the remote signer config using a
+// config file and command line options.
+//
+// The configuration proceeds as follows:s
+//  1. Start with a default signer config with sane settings
+//  2. Overwrite with signer specific values
+//  3. Pre-parse the command line to check for an alternative config file
+//  4. Load a default lnd config, and merge the signer configuration file with
+//     the main config file.
+//  5. Parse CLI options and overwrite/add any specified options
+func LoadSignerConfig(interceptor signal.Interceptor) (*Config, error) {
+
+	mergeConf := func(signerCfg *SignerConfig) (*Config, error) {
+		cfg := DefaultConfig()
+
+		// First we'll overwrite the default config with values that
+		// should be set when a node acts as a remote signer.
+		cfg.NoNetBootstrap = true
+		cfg.DisableListen = true
+		cfg.Bitcoin.Node = noChainBackendName
+		cfg.ConfigFile = DefaultSignerConfigFile
+
+		// Next, we'll copy over the values that are set in the signer
+		// config, to merge them with the default config.
+		cfg.LndDir = signerCfg.LndDir
+		cfg.ConfigFile = signerCfg.ConfigFile
+		cfg.DataDir = signerCfg.DataDir
+
+		cfg.DebugLevel = signerCfg.DebugLevel
+		cfg.TLSCertPath = signerCfg.TLSCertPath
+		cfg.TLSKeyPath = signerCfg.TLSKeyPath
+		cfg.LogDir = signerCfg.LogDir
+		cfg.MaxLogFiles = signerCfg.MaxLogFiles
+		cfg.MaxLogFileSize = signerCfg.MaxLogFileSize
+		cfg.RPCMiddleware = signerCfg.RPCMiddleware
+
+		cfg.RawRPCListeners = signerCfg.RawRPCListeners
+		cfg.RawRESTListeners = signerCfg.RawRESTListeners
+		cfg.RawListeners = signerCfg.RawListeners
+
+		cfg.RemoteSigner.SignerRole = signerCfg.SignerRole
+		cfg.RemoteSigner.Timeout = signerCfg.Timeout
+		cfg.RemoteSigner.RequestTimeout = signerCfg.RequestTimeout
+
+		cfg.RemoteSigner.RPCHost = signerCfg.WatchOnlyRPCHost
+		cfg.RemoteSigner.MacaroonPath = signerCfg.WatchOnlyMacaroonPath
+		cfg.RemoteSigner.TLSCertPath = signerCfg.WatchOnlyTLSCertPath
+
+		cfg.Pprof = signerCfg.Pprof
+
+		switch signerCfg.Network {
+		case (chainreg.BitcoinMainNetParams.Params.Name):
+			cfg.Bitcoin.MainNet = true
+		case (chainreg.BitcoinTestNetParams.Params.Name):
+			cfg.Bitcoin.TestNet3 = true
+		case (chainreg.BitcoinRegTestNetParams.Params.Name):
+			cfg.Bitcoin.RegTest = true
+		case (chainreg.BitcoinSimNetParams.Params.Name):
+			cfg.Bitcoin.SimNet = true
+		case (chainreg.BitcoinSigNetParams.Params.Name):
+			cfg.Bitcoin.SigNet = true
+		default:
+			return nil, fmt.Errorf(
+				"unknown network %s", signerCfg.Network,
+			)
+		}
+
+		return &cfg, nil
+	}
+
+	getShowVersion := func(signerCfg *SignerConfig) bool {
+		return signerCfg.ShowVersion
+	}
+
+	getLndDir := func(signerCfg *SignerConfig) string {
+		return signerCfg.LndDir
+	}
+
+	getConfigPath := func(signerCfg *SignerConfig) string {
+		return signerCfg.ConfigFile
+	}
+
 	// Pre-parse the command line options to pick up an alternative config
 	// file.
-	preCfg := DefaultConfig()
+	preCfg := DefaultSignerConfig()
+
+	cfg, err := generalizedConfigLoader(
+		interceptor, preCfg, mergeConf, getShowVersion, getLndDir,
+		getConfigPath, DefaultSignerConfigFile,
+		lncfg.DefaultSignerConfigFilename,
+	)
+
+	return cfg, err
+}
+
+func generalizedConfigLoader[R interface{}](interceptor signal.Interceptor,
+	preCfg R, mergeConfig func(cfg *R) (*Config, error),
+	getShowVersion func(cfg *R) bool,
+	getLndDir, getConfigPath func(cfg *R) string, defaultConfigPath,
+	defaultConfigFileName string) (*Config, error) {
+
+	// Pre-parse the command line options to pick up an alternative config
+	// file.
 	if _, err := flags.Parse(&preCfg); err != nil {
 		return nil, err
 	}
@@ -761,7 +947,7 @@ func LoadConfig(interceptor signal.Interceptor) (*Config, error) {
 	appName := filepath.Base(os.Args[0])
 	appName = strings.TrimSuffix(appName, filepath.Ext(appName))
 	usageMessage := fmt.Sprintf("Use %s -h to show usage", appName)
-	if preCfg.ShowVersion {
+	if getShowVersion(&preCfg) {
 		fmt.Println(appName, "version", build.Version(),
 			"commit="+build.Commit)
 		os.Exit(0)
@@ -771,21 +957,21 @@ func LoadConfig(interceptor signal.Interceptor) (*Config, error) {
 	// use the default config file path. However, if the user has modified
 	// their lnddir, then we should assume they intend to use the config
 	// file within it.
-	configFileDir := CleanAndExpandPath(preCfg.LndDir)
-	configFilePath := CleanAndExpandPath(preCfg.ConfigFile)
+	configFileDir := CleanAndExpandPath(getLndDir(&preCfg))
+	configFilePath := CleanAndExpandPath(getConfigPath(&preCfg))
 	switch {
 	// User specified --lnddir but no --configfile. Update the config file
 	// path to the lnd config directory, but don't require it to exist.
 	case configFileDir != DefaultLndDir &&
-		configFilePath == DefaultConfigFile:
+		configFilePath == defaultConfigPath:
 
 		configFilePath = filepath.Join(
-			configFileDir, lncfg.DefaultConfigFilename,
+			configFileDir, defaultConfigFileName,
 		)
 
 	// User did specify an explicit --configfile, so we check that it does
 	// exist under that path to avoid surprises.
-	case configFilePath != DefaultConfigFile:
+	case configFilePath != defaultConfigPath:
 		if !lnrpc.FileExists(configFilePath) {
 			return nil, fmt.Errorf("specified config file does "+
 				"not exist in %s", configFilePath)
@@ -794,8 +980,7 @@ func LoadConfig(interceptor signal.Interceptor) (*Config, error) {
 
 	// Next, load any additional configuration options from the file.
 	var configFileError error
-	cfg := preCfg
-	fileParser := flags.NewParser(&cfg, flags.Default)
+	fileParser := flags.NewParser(&preCfg, flags.Default)
 	err := flags.NewIniParser(fileParser).ParseFile(configFilePath)
 	if err != nil {
 		// If it's a parsing related error, then we'll return
@@ -812,14 +997,29 @@ func LoadConfig(interceptor signal.Interceptor) (*Config, error) {
 
 	// Finally, parse the remaining command line options again to ensure
 	// they take precedence.
-	flagParser := flags.NewParser(&cfg, flags.Default)
+	flagParser := flags.NewParser(&preCfg, flags.Default)
 	if _, err := flagParser.Parse(); err != nil {
+		return nil, err
+	}
+
+	cfg, err := mergeConfig(&preCfg)
+	if err != nil {
+		return nil, err
+	}
+
+	// The old flag parser may not be aware of fields that exist in the
+	// Config struct, as it only knows about the fields in the preCfg
+	// definition, we need to create a new flag parser that knows about the
+	// fields in the Config struct, as this flag parser is passed to the
+	// ValidateConfig function below.
+	mergedFlagParser := flags.NewParser(cfg, flags.Default)
+	if _, err := mergedFlagParser.Parse(); err != nil {
 		return nil, err
 	}
 
 	// Make sure everything we just loaded makes sense.
 	cleanCfg, err := ValidateConfig(
-		cfg, interceptor, fileParser, flagParser,
+		*cfg, interceptor, fileParser, mergedFlagParser,
 	)
 	var usageErr *lncfg.UsageError
 	if errors.As(err, &usageErr) {
@@ -1301,7 +1501,7 @@ func ValidateConfig(cfg Config, interceptor signal.Interceptor, fileParser,
 	case neutrinoBackendName:
 		// No need to get RPC parameters.
 
-	case "nochainbackend":
+	case noChainBackendName:
 		// Nothing to configure, we're running without any chain
 		// backend whatsoever (pure signing mode).
 
