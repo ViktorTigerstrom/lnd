@@ -87,20 +87,20 @@ func (r *RemoteSigner) Validate() error {
 
 	if r.SignerRole == OutboundSignerRole && r.RPCHost == "" {
 		return fmt.Errorf("remote signer: the rpchost for the " +
-			"watch-only node should be set when the signerrole " +
-			"is set to 'signer-outbound'")
+			"watch-only node must be set when the node acts as " +
+			"an outbound remote signer")
 	}
 
 	if r.SignerRole == OutboundSignerRole && r.MacaroonPath == "" {
 		return fmt.Errorf("remote signer: the macaroonpath for the " +
-			"watch-only node should be set when the signerrole " +
-			"is set to 'signer-outbound'")
+			"watch-only node must be set when the node acts as " +
+			"an outbound remote signer")
 	}
 
 	if r.SignerRole == OutboundSignerRole && r.TLSCertPath == "" {
 		return fmt.Errorf("remote signer: the tlscertpath for the " +
-			"watch-only node should be set when the signerrole " +
-			"is set to 'signer-outbound'")
+			"watch-only node must be set when the node acts as " +
+			"an outbound remote signer")
 	}
 
 	if !r.Enable {
