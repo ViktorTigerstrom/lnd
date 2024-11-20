@@ -109,7 +109,7 @@ $(GOIMPORTS_BIN):
 
 #? build: Build lnd, lncli and lndsigner binaries, place them in project directory
 build:
-	@$(call print, "Building debug lnd and lncli.")
+	@$(call print, "Building debug lnd/lndsigner and lncli.")
 	$(GOBUILD) -tags="$(DEV_TAGS)" -o lnd-debug $(DEV_GCFLAGS) $(DEV_LDFLAGS) $(PKG)/cmd/lnd
 	$(GOBUILD) -tags="$(DEV_TAGS)" -o lncli-debug $(DEV_GCFLAGS) $(DEV_LDFLAGS) $(PKG)/cmd/lncli
 	$(GOBUILD) -tags="$(LND_SIGNER_TAGS)" -o lndsigner-debug $(DEV_GCFLAGS) $(DEV_LDFLAGS) $(PKG)/cmd/lndsigner
@@ -134,7 +134,7 @@ build-itest-race:
 
 #? install-binaries: Build and install lnd, lncli and lndsigner binaries, place them in $GOPATH/bin
 install-binaries:
-	@$(call print, "Installing lnd and lncli.")
+	@$(call print, "Installing lnd/lndsigner and lncli.")
 	$(GOINSTALL) -tags="${tags}" -ldflags="$(RELEASE_LDFLAGS)" $(PKG)/cmd/lnd
 	$(GOINSTALL) -tags="${tags}" -ldflags="$(RELEASE_LDFLAGS)" $(PKG)/cmd/lncli
 	$(GOINSTALL) -tags="${LND_SIGNER_TAGS}" -ldflags="$(RELEASE_LDFLAGS)" $(PKG)/cmd/lndsigner
@@ -154,7 +154,7 @@ install-all: install manpages
 
 #? release-install: Build and install lnd, lncli and lndsigner binaries release binaries, place them in $GOPATH/bin
 release-install:
-	@$(call print, "Installing release lnd and lncli.")
+	@$(call print, "Installing release lnd/lndsigner and lncli.")
 	env CGO_ENABLED=0 $(GOINSTALL) -v -trimpath -ldflags="$(RELEASE_LDFLAGS)" -tags="$(RELEASE_TAGS)" $(PKG)/cmd/lnd
 	env CGO_ENABLED=0 $(GOINSTALL) -v -trimpath -ldflags="$(RELEASE_LDFLAGS)" -tags="$(RELEASE_TAGS)" $(PKG)/cmd/lncli
 	env CGO_ENABLED=0 $(GOINSTALL) -v -trimpath -ldflags="$(RELEASE_LDFLAGS)" -tags="$(LND_SIGNER_TAGS)" $(PKG)/cmd/lndsigner
@@ -163,9 +163,9 @@ release-install:
 # Make sure the generated mobile RPC stubs don't influence our vendor package
 # by removing them first in the clean-mobile target.
 release: clean-mobile
-	@$(call print, "Releasing lnd, lncli and lndsigner binaries.")
+	@$(call print, "Releasing lnd/lndsigner and lncli binaries.")
 	$(VERSION_CHECK)
-	./scripts/release.sh build-release "$(VERSION_TAG)" "$(BUILD_SYSTEM)" "$(RELEASE_TAGS)" "$(RELEASE_LDFLAGS)" "$(GO_VERSION)"
+	./scripts/release.sh build-release "$(VERSION_TAG)" "$(BUILD_SYSTEM)" "$(RELEASE_TAGS)" "$(LND_SIGNER_TAGS)" "$(RELEASE_LDFLAGS)" "$(GO_VERSION)"
 
 #? docker-release: Same as release but within a docker container to support reproducible builds on BSD/MacOS platforms
 docker-release:
