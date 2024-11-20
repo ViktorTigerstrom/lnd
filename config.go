@@ -1055,12 +1055,15 @@ func generalizedConfigLoader[R GeneralizedConfig](
 		return nil, err
 	}
 
-	// The old flag parser may not be aware of fields that exist in the
-	// Config struct, as it only knows about the fields in the preCfg
-	// definition, we need to create a new flag parser that knows about the
-	// fields in the Config struct, as this flag parser is passed to the
-	// ValidateConfig function below.
-	mergedFlagParser := flags.NewParser(cfg, flags.Default)
+	// The old flag parser is only aware of the flags in the preCfg
+	// definition, not those in the Config struct. To handle this, we create
+	// a new flag parser for the Config struct, as it is passed to the
+	// ValidateConfig function.
+	// Since some flags in preCfg may not exist in Config, we use
+	// flags.IgnoreUnknown here to avoid errors for those flags. However,
+	// unknown flags are not allowed for the preCfg itself, as the earlier
+	// flag parser will error if such flags are present.
+	mergedFlagParser := flags.NewParser(cfg, flags.IgnoreUnknown)
 	if _, err := mergedFlagParser.Parse(); err != nil {
 		return nil, err
 	}
