@@ -430,7 +430,7 @@ mobile: ios android
 #? clean: Remove all generated files
 clean:
 	@$(call print, "Cleaning source.$(NC)")
-	$(RM) ./lnd-debug ./lncli-debug
+	$(RM) ./lnd-debug ./lndsigner-debug ./lncli-debug
 	$(RM) ./lnd-itest ./lncli-itest
 	$(RM) -r ./vendor .vendor-new
 
