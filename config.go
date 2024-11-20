@@ -746,6 +746,16 @@ func DefaultConfig() Config {
 	}
 }
 
+// SignerConfig defines the configuration options for lndsigner.
+//
+// Note! Any new fields added to this struct MUST also be applied to the merged
+// config in the `mergeConf` function in LoadSignerConfig. Else the added fields
+// will have no effect.
+//
+// See LoadSignerConfig for further details regarding the configuration
+// loading+parsing process.
+//
+//nolint:lll
 type SignerConfig struct {
 	ShowVersion bool `short:"V" long:"version" description:"Display version information and exit"`
 
@@ -766,7 +776,7 @@ type SignerConfig struct {
 
 	DebugLevel string `short:"d" long:"debuglevel" description:"Logging level for all subsystems {trace, debug, info, warn, error, critical} -- You may also specify <global-level>,<subsystem>=<level>,<subsystem2>=<level>,... to set the log level for individual subsystems -- Use show to list available subsystems"`
 
-	Network string `long:"network" description:"The network the UI and all its components run on" choice:"regtest" choice:"testnet3" choice:"mainnet" choice:"simnet" choice:"signet"`
+	Network string `long:"network" description:"The network the UI and all its components run on" choice:"regtest" choice:"testnet" choice:"testnet3" choice:"mainnet" choice:"simnet" choice:"signet"`
 
 	Pprof *lncfg.Pprof `group:"Pprof" namespace:"pprof"`
 
@@ -795,7 +805,7 @@ func DefaultSignerConfig() SignerConfig {
 
 		Network: chainreg.BitcoinMainNetParams.Params.Name,
 
-		SignerRole:     lncfg.InboundSignerRole,
+		SignerRole:     lncfg.OutboundSignerRole,
 		Timeout:        lncfg.DefaultRemoteSignerRPCTimeout,
 		RequestTimeout: lncfg.DefaultRequestTimeout,
 	}
@@ -889,7 +899,7 @@ func LoadSignerConfig(interceptor signal.Interceptor) (*Config, error) {
 		switch signerCfg.Network {
 		case (chainreg.BitcoinMainNetParams.Params.Name):
 			cfg.Bitcoin.MainNet = true
-		case (chainreg.BitcoinTestNetParams.Params.Name):
+		case (chainreg.BitcoinTestNetParams.Params.Name), "testnet":
 			cfg.Bitcoin.TestNet3 = true
 		case (chainreg.BitcoinRegTestNetParams.Params.Name):
 			cfg.Bitcoin.RegTest = true
@@ -927,6 +937,16 @@ func LoadSignerConfig(interceptor signal.Interceptor) (*Config, error) {
 		getConfigPath, DefaultSignerConfigFile,
 		lncfg.DefaultSignerConfigFilename,
 	)
+
+	// TODO(viktor): Remove this once RPCMiddleware interception is
+	// supported for outbound remote signers.
+	if cfg.RemoteSigner.SignerRole == lncfg.OutboundSignerRole &&
+		cfg.RPCMiddleware.Enable {
+
+		return nil, errors.New("RPCMiddleware interception is " +
+			"currently not supported when using an outbound " +
+			"remote signer")
+	}
 
 	return cfg, err
 }
