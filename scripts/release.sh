@@ -224,8 +224,7 @@ required Go version ($goversion)."
   done
 
   # Add the hash of the packages too, then sort by the second column (name).
-  shasum -a 256 "${LND_PACKAGE}"-* vendor* >> "manifest-$tag.txt"
-  shasum -a 256 "${SIGNER_PACKAGE}"-* vendor* >> "manifest-$tag.txt"
+  shasum -a 256 "${LND_PACKAGE}"-* "${SIGNER_PACKAGE}"-* vendor* >> "manifest-$tag.txt"
   LC_ALL=C sort -k2 -o "manifest-$tag.txt" "manifest-$tag.txt"
   cat "manifest-$tag.txt"
 }
