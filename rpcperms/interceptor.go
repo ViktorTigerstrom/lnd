@@ -115,36 +115,41 @@ var (
 	// remoteSignerWhitelist specifies the methods allowed when the node
 	// functions as a remote signer.
 	remoteSignerWhitelist = map[string]struct{}{
-		// Direct remote signing methods
-		"/walletrpc.WalletKit/SignCoordinatorStreams": {},
-		"/walletrpc.WalletKit/SignPsbt":               {},
-		"/signrpc.Signer/DeriveSharedKey":             {},
-		"/signrpc.Signer/MuSig2Cleanup":               {},
-		"/signrpc.Signer/MuSig2CombineSig":            {},
-		"/signrpc.Signer/MuSig2CreateSession":         {},
-		"/signrpc.Signer/MuSig2RegisterNonces":        {},
-		"/signrpc.Signer/MuSig2Sign":                  {},
-		"/signrpc.Signer/SignMessage":                 {},
-		// Standard methods
-		"/lnrpc.Lightning/GetInfo":        {},
-		"/lnrpc.Lightning/StopDaemon":     {},
-		"/verrpc.Versioner/GetVersion":    {},
-		"/lnrpc.Lightning/DebugLevel":     {},
-		"/lnrpc.Lightning/GetDebugInfo":   {},
-		"/lnrpc.Lightning/GetNetworkInfo": {},
-		// Macaroon methods
+		// Required setup method to create a watch-only node if not
+		// migrating an existing wallet to a watch-only version.
+		"/walletrpc.WalletKit/ListAccounts": {},
+
+		// Required methods called by watch-only node for an inbound
+		// remote signer.
+		"/walletrpc.WalletKit/SignPsbt":        {},
+		"/signrpc.Signer/DeriveSharedKey":      {},
+		"/signrpc.Signer/MuSig2Cleanup":        {},
+		"/signrpc.Signer/MuSig2CombineSig":     {},
+		"/signrpc.Signer/MuSig2CreateSession":  {},
+		"/signrpc.Signer/MuSig2RegisterNonces": {},
+		"/signrpc.Signer/MuSig2Sign":           {},
+		"/signrpc.Signer/SignMessage":          {},
+
+		// Macaroon methods. An inbound remote signer needs to create a
+		// macaroon for the watch-only node.
 		"/lnrpc.Lightning/BakeMacaroon":             {},
 		"/lnrpc.Lightning/ListMacaroonIDs":          {},
 		"/lnrpc.Lightning/DeleteMacaroonID":         {},
 		"/lnrpc.Lightning/ListPermissions":          {},
 		"/lnrpc.Lightning/CheckMacaroonPermissions": {},
 
-		"/walletrpc.WalletKit/ListAccounts":  {},
-		"/walletrpc.WalletKit/ListAddresses": {},
+		// Standard daemon methods
+		"/lnrpc.Lightning/StopDaemon":     {},
+		"/lnrpc.Lightning/DebugLevel":     {},
+		"/verrpc.Versioner/GetVersion":    {},
+		"/lnrpc.Lightning/GetInfo":        {},
+		"/lnrpc.Lightning/GetDebugInfo":   {},
+		"/lnrpc.Lightning/GetNetworkInfo": {},
 
-		"/lnrpc.Lightning/NewAddress":    {},
 		"/lnrpc.Lightning/VerifyMessage": {},
 
+		// Add the ability to add RPCMiddleware interception for the
+		// remote signer.
 		lnrpc.RegisterRPCMiddlewareURI: {},
 	}
 
