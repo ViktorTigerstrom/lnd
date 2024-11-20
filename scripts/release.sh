@@ -128,6 +128,10 @@ function check_tag_correct() {
   fi
 }
 
+# build_package builds release binaries for the passed package and lncli, for
+# the passed environment.
+#   arguments: <package-name> <iteration-index> <tag> <os> <arch> <arm>
+#              <build-tags> <ldflags>
 function build_package() {
   local package_name=$1
   local index=$2
@@ -135,16 +139,16 @@ function build_package() {
   local os=$4
   local arch=$5
   local arm=$6
-  local buildtags=$7
+  local build_tags=$7
   local ldflags=$8
 
-  dir="${package_name}-${i}-${tag}"
+  dir="${package_name}-${index}-${tag}"
   mkdir "${dir}"
   pushd "${dir}"
 
-  green " - Building ${package_name}: ${os} ${arch} ${arm} with build tags '${buildtags}'"
-  env GOEXPERIMENT=loopvar CGO_ENABLED=0 GOOS=$os GOARCH=$arch GOARM=$arm go build -v -trimpath -ldflags="${ldflags}" -tags="${buildtags}" ${PKG}/cmd/${package_name}
-  env GOEXPERIMENT=loopvar CGO_ENABLED=0 GOOS=$os GOARCH=$arch GOARM=$arm go build -v -trimpath -ldflags="${ldflags}" -tags="${buildtags}" ${PKG}/cmd/lncli
+  green " - Building ${package_name}: ${os} ${arch} ${arm} with build tags '${build_tags}'"
+  env GOEXPERIMENT=loopvar CGO_ENABLED=0 GOOS=$os GOARCH=$arch GOARM=$arm go build -v -trimpath -ldflags="${ldflags}" -tags="${build_tags}" ${PKG}/cmd/${package_name}
+  env GOEXPERIMENT=loopvar CGO_ENABLED=0 GOOS=$os GOARCH=$arch GOARM=$arm go build -v -trimpath -ldflags="${ldflags}" -tags="${build_tags}" ${PKG}/cmd/lncli
   popd
 
   # Add the hashes for the individual binaries as well for easy verification
