@@ -37,13 +37,13 @@ const semanticAlphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqr
 // versioning 2.0.0 spec (http://semver.org/).
 const (
 	// AppMajor defines the major version of this binary.
-	AppMajor uint = 0
+	AppMajor uint = 1111111
 
 	// AppMinor defines the minor version of this binary.
-	AppMinor uint = 18
+	AppMinor uint = 0
 
 	// AppPatch defines the application patch for this binary.
-	AppPatch uint = 99
+	AppPatch uint = 2
 
 	// AppPreRelease MUST only contain characters from semanticAlphabet per
 	// the semantic versioning spec.
