@@ -75,6 +75,9 @@ Recommended entries in `lnd.conf` if using an `lnd` instance as the remote
 signer:
 
 ```text
+# Indicates that the node will function as an inbound remote signer
+remotesigner.signerrole=signer-inbound
+
 # We apply some basic "hardening" parameters to make sure no connections to the
 # internet are opened.
 
