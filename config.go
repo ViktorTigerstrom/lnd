@@ -795,9 +795,8 @@ type SignerConfig struct {
 	ConfigFile string `short:"C" long:"configfile" description:"Path to configuration file"`
 	DataDir    string `short:"b" long:"datadir" description:"The directory to store lnd's data within"`
 
-	LogDir         string `long:"logdir" description:"Directory to log output."`
-	MaxLogFiles    int    `long:"maxlogfiles" description:"Maximum logfiles to keep (0 for no rotation). DEPRECATED: use --logging.file.max-files instead" hidden:"true"`
-	MaxLogFileSize int    `long:"maxlogfilesize" description:"Maximum logfile size in MB. DEPRECATED: use --logging.file.max-file-size instead" hidden:"true"`
+	LogDir    string           `long:"logdir" description:"Directory to log output."`
+	LogConfig *build.LogConfig `group:"logging" namespace:"logging"`
 
 	TLSCertPath string `long:"tlscertpath" description:"Path to write the TLS certificate for lnd's RPC and REST services"`
 	TLSKeyPath  string `long:"tlskeypath" description:"Path to write the TLS private key for lnd's RPC and REST services"`
@@ -839,16 +838,15 @@ func (s SignerConfig) GetConfigFile() string {
 
 func DefaultSignerConfig() SignerConfig {
 	return SignerConfig{
-		LndDir:         DefaultLndDir,
-		ConfigFile:     DefaultSignerConfigFile,
-		DataDir:        defaultDataDir,
-		DebugLevel:     defaultLogLevel,
-		TLSCertPath:    defaultTLSCertPath,
-		TLSKeyPath:     defaultTLSKeyPath,
-		LogDir:         defaultLogDir,
-		MaxLogFiles:    build.DefaultMaxLogFiles,
-		MaxLogFileSize: build.DefaultMaxLogFileSize,
-		RPCMiddleware:  lncfg.DefaultRPCMiddleware(),
+		LndDir:        DefaultLndDir,
+		ConfigFile:    DefaultSignerConfigFile,
+		DataDir:       defaultDataDir,
+		DebugLevel:    defaultLogLevel,
+		TLSCertPath:   defaultTLSCertPath,
+		TLSKeyPath:    defaultTLSKeyPath,
+		LogDir:        defaultLogDir,
+		LogConfig:     build.DefaultLogConfig(),
+		RPCMiddleware: lncfg.DefaultRPCMiddleware(),
 
 		Network: chainreg.BitcoinMainNetParams.Params.Name,
 
@@ -917,8 +915,7 @@ func LoadSignerConfig(interceptor signal.Interceptor) (*Config, error) {
 		cfg.TLSCertPath = signerCfg.TLSCertPath
 		cfg.TLSKeyPath = signerCfg.TLSKeyPath
 		cfg.LogDir = signerCfg.LogDir
-		cfg.MaxLogFiles = signerCfg.MaxLogFiles
-		cfg.MaxLogFileSize = signerCfg.MaxLogFileSize
+		cfg.LogConfig = signerCfg.LogConfig
 		cfg.RPCMiddleware = signerCfg.RPCMiddleware
 
 		cfg.RawRPCListeners = signerCfg.RawRPCListeners
