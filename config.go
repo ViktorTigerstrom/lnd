@@ -952,8 +952,8 @@ func LoadSignerConfig(interceptor signal.Interceptor) (*Config, error) {
 		return &cfg, nil
 	}
 
-	// Pre-parse the command line options to pick up an alternative config
-	// file.
+	// We use the SignerConfig, as the lndsigner should have more limited
+	// config options for an easier UX.
 	preCfg := DefaultSignerConfig()
 
 	cfg, err := generalizedConfigLoader(
