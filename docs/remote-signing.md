@@ -130,10 +130,10 @@ remotesigner.enable=true
 remotesigner.rpchost=zane.example.internal:10019
 remotesigner.tlscertpath=/home/watch-only/example/signer.tls.cert
 remotesigner.macaroonpath=/home/watch-only/example/signer.custom.macaroon
-# Optionally, specify that the watch-only node uses an inbound remote signer.
-# However, since the default signerrole is "watchonly-inbound," this isn't
-# required.
-remotesigner.signerrole=watchonly-inbound
+# Optionally, specify that the watch-only doesn't allow any inbound connections
+# from the remote signer.
+# However, since this is the default behaviour, this isn't required.
+remotesigner.allowinboundconnection=false
 ```
 
 After starting "watch-only", the wallet can be created in watch-only mode by
@@ -200,14 +200,14 @@ bitcoin.mainnet=true
 bitcoin.node=nochainbackend
 
 # Specify that signer will make an outbound connection to the watch-only node.
-remotesigner.signerrole=signer-outbound
+watchonlynode.enable=true
 
 # The watch-only node's RPC host.
-remotesigner.rpchost=zane.example.internal:10019
+watchonlynode.rpchost=zane.example.internal:10019
 
 # A macaroon and TLS certificate for the watch-only node.
-remotesigner.macaroonpath=/home/signer/example/watch-only.custom.macaroon
-remotesigner.tlscertpath=/home/signer/example/watch-only.tls.cert
+watchonlynode.macaroonpath=/home/signer/example/watch-only.custom.macaroon
+watchonlynode.tlscertpath=/home/signer/example/watch-only.tls.cert
 ```
 
 **Note:** The watch-only node’s `rpchost`, `macaroonpath`, and `tlscertpath`
@@ -268,8 +268,9 @@ When starting the watch-only node, ensure the following entries are set in
 # Enable the use of a remote signer.
 remotesigner.enable=true
 
-# Specify that an outbound remote signer is being used.
-remotesigner.signerrole=watchonly-outbound
+# Specify that the watch-only node will accept an incoming connection from the
+# remote signer.
+remotesigner.allowinboundconnection=true
 ```
 
 It is also recommended to set the following parameter, which defines the
@@ -313,7 +314,7 @@ wallet.
 
 Finally, if the watch-only node and signer node are set up in different
 environments, you will also need to copy the watch-only node's TLS certificate
-and place it in the path specified for the `remotesigner.tlscertpath`
+and place it in the path specified for the `watchonlynode.tlscertpath`
 configuration field in Step 1.
 
 ## Migrating an existing setup to remote signing

@@ -81,7 +81,7 @@ type Config struct {
 	// ChanStateDB is the reference to the channel db.
 	ChanStateDB *channeldb.ChannelStateDB
 
-	// RemoteSigner is the remote signer that the WalletKit will use to
-	// sign transactions, if enabled.
-	RemoteSigner RemoteSigner
+	// RemoteSignerConnection is a connection to the remote signer that the
+	// WalletKit server will use to sign transactions, if enabled.
+	RemoteSignerConnection RemoteSignerConnection
 }

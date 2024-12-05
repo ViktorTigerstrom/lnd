@@ -849,10 +849,6 @@ func (d *RPCSignerWalletImpl) BuildChainControl(
 		cleanUpTasks []func()
 		cleanUp      = func() {
 			for _, fn := range cleanUpTasks {
-				if fn == nil {
-					continue
-				}
-
 				fn()
 			}
 		}
@@ -867,13 +863,15 @@ func (d *RPCSignerWalletImpl) BuildChainControl(
 		return nil, cleanUp, err
 	}
 
-	remoteSignerBuilder := rpcwallet.NewRemoteSignerBuilder(
+	remoteSignerConnBuilder := rpcwallet.NewRemoteSignerBuilder(
 		d.DefaultWalletImpl.cfg.RemoteSigner,
 	)
 
 	// Create the remote signer instance. The remote signer instance type
 	// will depend on the configuration passed to the builders contructor.
-	remoteSigner, rsCleanUp, err := remoteSignerBuilder.Build()
+	remoteSignerConn, err := remoteSignerConnBuilder.Build(
+		context.Background(),
+	)
 	if err != nil {
 		err := fmt.Errorf("unable to set up remote signer: %w", err)
 		d.logger.Error(err)
@@ -881,7 +879,7 @@ func (d *RPCSignerWalletImpl) BuildChainControl(
 		return nil, cleanUp, err
 	}
 
-	cleanUpTasks = append(cleanUpTasks, rsCleanUp)
+	cleanUpTasks = append(cleanUpTasks, remoteSignerConn.Stop)
 
 	baseKeyRing := keychain.NewBtcWalletKeyRing(
 		walletController.InternalWallet(), walletConfig.CoinType,
@@ -889,7 +887,7 @@ func (d *RPCSignerWalletImpl) BuildChainControl(
 
 	rpcKeyRing, err := rpcwallet.NewRPCKeyRing(
 		baseKeyRing, walletController,
-		remoteSigner, walletConfig.NetParams,
+		remoteSignerConn, walletConfig.NetParams,
 	)
 	if err != nil {
 		err := fmt.Errorf("unable to create RPC remote signing wallet "+

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lightningnetwork/lnd/fn"
+	"github.com/lightningnetwork/lnd/lncfg"
 	"github.com/lightningnetwork/lnd/lnrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/signrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/walletrpc"
@@ -51,6 +52,40 @@ const (
 	handshakeRequestID = uint64(1)
 )
 
+// Stream represents the stream to the watch-only node with a Close function
+// that closes the connection.
+type Stream struct {
+	StreamClient
+
+	// Close closes the connection to the watch-only node.
+	Close func() error
+}
+
+// NewStream creates a new Stream instance.
+func NewStream(client StreamClient, closeConn func() error) *Stream {
+	return &Stream{
+		StreamClient: client,
+		Close:        closeConn,
+	}
+}
+
+// CancelOrQuit is used to create a cancellable context that will be
+// cancelled if the passed quit channel is signalled.
+func CancelOrQuit(ctx context.Context, quit chan struct{}) (context.Context,
+	context.CancelFunc) {
+
+	ctx, cancel := context.WithCancel(ctx)
+	go func() {
+		select {
+		case <-quit:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
+	return ctx, cancel
+}
+
 // SignCoordinatorStreamFeeder is an interface that returns a newly created
 // stream to the watch-only node. The stream is used to send and receive
 // messages between the remote signer client and the watch-only node.
@@ -58,7 +93,7 @@ type SignCoordinatorStreamFeeder interface {
 	// GetStream returns a new stream to the watch-only node. The function
 	// also returns a cleanup function that should be called when the stream
 	// is no longer needed.
-	GetStream(streamCtx context.Context) (StreamClient, func(), error)
+	GetStream(ctx context.Context) (*Stream, error)
 
 	// Stop stops the stream feeder.
 	Stop()
@@ -80,23 +115,16 @@ type RemoteSignerClient interface {
 type StreamFeeder struct {
 	wg sync.WaitGroup
 
-	rpcHost, macaroonPath, tlsCertPath string
-
-	timeout time.Duration
+	cfg lncfg.ConnectionCfg
 
 	quit chan struct{}
 }
 
 // NewStreamFeeder creates a new StreamFeeder instance.
-func NewStreamFeeder(rpcHost, macaroonPath, tlsCertPath string,
-	timeout time.Duration) *StreamFeeder {
-
+func NewStreamFeeder(cfg lncfg.ConnectionCfg) *StreamFeeder {
 	return &StreamFeeder{
-		quit:         make(chan struct{}),
-		rpcHost:      rpcHost,
-		macaroonPath: macaroonPath,
-		tlsCertPath:  tlsCertPath,
-		timeout:      timeout,
+		quit: make(chan struct{}),
+		cfg:  cfg,
 	}
 }
 
@@ -116,51 +144,50 @@ func (s *StreamFeeder) Stop() {
 // stream is no longer needed.
 //
 // NOTE: This is part of the SignCoordinatorStreamFeeder interface.
-func (s *StreamFeeder) GetStream(streamCtx context.Context) (
-	StreamClient, func(), error) {
-
+func (s *StreamFeeder) GetStream(ctx context.Context) (*Stream, error) {
 	select {
 	// Don't run if the StreamFeeder has already been shutdown.
 	case <-s.quit:
-		return nil, nil, ErrShuttingDown
+		return nil, ErrShuttingDown
 	default:
 	}
 
 	// Create a new outbound gRPC connection to the watch-only node.
-	conn, err := s.getClientConn()
+	conn, err := s.getClientConn(ctx)
 	if err != nil {
-		return nil, nil, err
-	}
-
-	cleanUp := func() {
-		conn.Close()
+		return nil, err
 	}
 
 	// Wrap the connection in a WalletKitClient.
 	walletKitClient := walletrpc.NewWalletKitClient(conn)
 
 	// Create a new stream to the watch-only node.
-	stream, err := walletKitClient.SignCoordinatorStreams(streamCtx)
+	streamClient, err := walletKitClient.SignCoordinatorStreams(ctx)
 	if err != nil {
-		cleanUp()
+		connErr := conn.Close()
+		if connErr != nil {
+			log.Errorf("Unable to close watch-only node "+
+				"connection: %v", connErr)
+		}
 
-		return nil, nil, err
+		return nil, err
 	}
 
-	return stream, cleanUp, nil
+	return NewStream(streamClient, conn.Close), nil
 }
 
 // getClientConn creates a new outbound gRPC connection to the watch-only node.
-func (s *StreamFeeder) getClientConn() (*grpc.ClientConn, error) {
+func (s *StreamFeeder) getClientConn(
+	ctx context.Context) (*grpc.ClientConn, error) {
 	// If we fail to connect to the watch-only node within the
 	// configured timeout we should return an error.
 	ctxt, cancel := context.WithTimeout(
-		context.Background(), s.timeout,
+		ctx, s.cfg.Timeout,
 	)
 	defer cancel()
 
 	// Load the specified macaroon file for the watch-only node.
-	macBytes, err := os.ReadFile(s.macaroonPath)
+	macBytes, err := os.ReadFile(s.cfg.MacaroonPath)
 	if err != nil {
 		return nil, fmt.Errorf("could not read macaroon file: %w", err)
 	}
@@ -179,7 +206,7 @@ func (s *StreamFeeder) getClientConn() (*grpc.ClientConn, error) {
 	}
 
 	// Load the specified TLS cert for the watch-only node.
-	tlsCreds, err := credentials.NewClientTLSFromFile(s.tlsCertPath, "")
+	tlsCreds, err := credentials.NewClientTLSFromFile(s.cfg.TLSCertPath, "")
 	if err != nil {
 		return nil, fmt.Errorf("could not load TLS cert: %w", err)
 	}
@@ -190,58 +217,16 @@ func (s *StreamFeeder) getClientConn() (*grpc.ClientConn, error) {
 		grpc.WithPerRPCCredentials(macCred),
 	}
 
-	var (
-		// A channel to signal when has successfully been created.
-		connDoneChan = make(chan *grpc.ClientConn)
-		errChan      = make(chan error)
-	)
+	// We create a new context that's either cancelled when the passed
+	// parent times out or is cancelled, or when the s.quit channel is
+	// closed.
+	ctx, _ = CancelOrQuit(ctxt, s.quit)
 
-	// Now let's try to connect to the watch-only node. We'll do this in a
-	// goroutine to ensure we can exit if the quit channel is closed. If the
-	// quit channel is closed, the context will also be canceled, hence
-	// stopping the goroutine.
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	log.Infof("Attempting to connect to the watch-only node on: %s",
+		s.cfg.RPCHost)
 
-		log.Infof("Attempting to connect to the watch-only node on: %s",
-			s.rpcHost)
-
-		conn, err := grpc.DialContext(ctxt, s.rpcHost, opts...)
-		if err != nil {
-			select {
-			case errChan <- fmt.Errorf("could not connect to "+
-				"watch-only node: %v", err):
-
-			case <-ctxt.Done():
-			}
-
-			return
-		}
-
-		// Only send the connection if the getClientConn function hasn't
-		// returned yet.
-		select {
-		case <-ctxt.Done():
-			return
-
-		case connDoneChan <- conn:
-		}
-	}()
-
-	select {
-	case conn := <-connDoneChan:
-		return conn, nil
-
-	case err := <-errChan:
-		return nil, err
-
-	case <-s.quit:
-		return nil, ErrShuttingDown
-
-	case <-ctxt.Done():
-		return nil, ctxt.Err()
-	}
+	// Connect to the watch-only node using the new context.
+	return grpc.DialContext(ctx, s.cfg.RPCHost, opts...)
 }
 
 // A compile time assertion to ensure StreamFeeder meets the
@@ -283,9 +268,6 @@ type OutboundClient struct {
 	// streamFeeder is the stream feeder that will set up a stream to the
 	// watch-only node when requested to do so by the remote signer client.
 	streamFeeder SignCoordinatorStreamFeeder
-
-	// stream is the stream between the node and the watch-only node.
-	stream StreamClient
 
 	// requestTimeout is the timeout used when sending responses to the
 	// watch-only node.
@@ -342,15 +324,15 @@ func NewOutboundClient(walletServer walletrpc.WalletKitServer,
 }
 
 // Start starts the remote signer client. The function will continuously try to
-// setup a connection to the configured watch-only node, and retry to connect if
-// the connection fails until we Stop the remote signer client.
+// set up a connection to the configured watch-only node, and retry to connect
+// if the connection fails until we Stop the remote signer client.
 func (r *OutboundClient) Start() error {
-	// We'll continuously try setup a connection to the watch-only node, and
-	// retry to connect if the connection fails until we Stop the remote
+	// We'll continuously try set up a connection to the watch-only node,
+	// and retry to connect if the connection fails until we Stop the remote
 	// signer client.
 	err := r.gManager.Go(func(_ context.Context) {
 		for {
-			err := r.run()
+			err := r.run(context.Background())
 			if err != nil {
 				log.Errorf("Remote signer client error: %v",
 					err)
@@ -416,14 +398,14 @@ func (r *OutboundClient) Stop() error {
 // responding to the sign requests that are sent over the stream. The function
 // will continuously run until the remote signer client is either stopped or
 // the stream errors.
-func (r *OutboundClient) run() error {
+func (r *OutboundClient) run(ctx context.Context) error {
 	select {
 	case <-r.quit:
 		return ErrShuttingDown
 	default:
 	}
 
-	streamCtx, cancel := context.WithCancel(context.Background())
+	ctxc, cancel := CancelOrQuit(ctx, r.quit)
 
 	// Cancel the stream context whenever we return from this function.
 	defer cancel()
@@ -431,18 +413,22 @@ func (r *OutboundClient) run() error {
 	log.Infof("Attempting to setup the watch-only node connection")
 
 	// Try to get a new stream to the watch-only node.
-	stream, streamCleanUp, err := r.streamFeeder.GetStream(streamCtx)
+	stream, err := r.streamFeeder.GetStream(ctxc)
 	if err != nil {
 		return err
 	}
-
-	r.stream = stream
-	defer streamCleanUp()
+	defer func() {
+		err := stream.Close()
+		if err != nil {
+			log.Errorf("Unable to close watch-only node "+
+				"connection: %v", err)
+		}
+	}()
 
 	// Once the stream has been created, we'll need to perform the handshake
 	// process with the watch-only node, before it will start sending us
 	// requests.
-	err = r.handshake(streamCtx)
+	err = r.handshake(ctxc, stream)
 	if err != nil {
 		return err
 	}
@@ -452,14 +438,14 @@ func (r *OutboundClient) run() error {
 	// Reset the retry timeout after a successful connection.
 	r.retryTimeout = defaultRetryTimeout
 
-	return r.processSignRequests(streamCtx)
+	return r.processSignRequests(ctxc, stream)
 }
 
 // handshake performs the handshake process with the watch-only node. As we are
 // the initiator of the stream, we need to send the first message over the
 // stream. The watch-only node will only proceed to sending us requests after
 // the handshake has been completed.
-func (r *OutboundClient) handshake(streamCtx context.Context) error {
+func (r *OutboundClient) handshake(ctx context.Context, stream *Stream) error {
 	var (
 		regSentChan  = make(chan struct{})
 		completeChan = make(chan *walletrpc.RegistrationComplete)
@@ -471,6 +457,11 @@ func (r *OutboundClient) handshake(streamCtx context.Context) error {
 		returnedChan = make(chan struct{})
 	)
 	defer close(returnedChan)
+
+	// Ensure that this function times out if we do not complete the
+	// handshake before the requestTimeout
+	ctxt, cancel := context.WithTimeout(ctx, r.requestTimeout)
+	defer cancel()
 
 	// completeType is a type alias for the registration complete type,
 	// created to keep line length within 80 characters.
@@ -495,7 +486,7 @@ func (r *OutboundClient) handshake(streamCtx context.Context) error {
 
 	// Send the registration message to the watch-only node.
 	err := r.gManager.Go(func(_ context.Context) {
-		err := r.stream.Send(registrationMsg)
+		err := stream.Send(registrationMsg)
 		if err != nil {
 			select {
 			case errChan <- err:
@@ -517,14 +508,8 @@ func (r *OutboundClient) handshake(streamCtx context.Context) error {
 		return fmt.Errorf("error sending registration message to "+
 			"watch-only node: %w", err)
 
-	case <-streamCtx.Done():
-		return streamCtx.Err()
-
-	case <-r.quit:
-		return ErrShuttingDown
-
-	case <-time.After(r.requestTimeout):
-		return errors.New("watch-only node handshake timeout")
+	case <-ctxt.Done():
+		return ctxt.Err()
 
 	case <-regSentChan:
 	}
@@ -533,7 +518,7 @@ func (r *OutboundClient) handshake(streamCtx context.Context) error {
 	// respond with a message indicating that it has accepted the signer
 	// registration request if the registration was successful.
 	err = r.gManager.Go(func(_ context.Context) {
-		msg, err := r.stream.Recv()
+		msg, err := stream.Recv()
 		if err != nil {
 			select {
 			case errChan <- err:
@@ -611,14 +596,8 @@ func (r *OutboundClient) handshake(streamCtx context.Context) error {
 	case err := <-errChan:
 		return fmt.Errorf("watch-only node handshake error: %w", err)
 
-	case <-r.quit:
-		return ErrShuttingDown
-
-	case <-streamCtx.Done():
-		return streamCtx.Err()
-
-	case <-time.After(r.requestTimeout):
-		return errors.New("watch-only node handshake timeout")
+	case <-ctxt.Done():
+		return ctxt.Err()
 	}
 
 	return nil
@@ -627,11 +606,18 @@ func (r *OutboundClient) handshake(streamCtx context.Context) error {
 // processSignRequests processes and responds to the sign requests that are
 // sent over the stream. The function will continuously run until the remote
 // signer client is either stopped or the stream errors.
-func (r *OutboundClient) processSignRequests(streamCtx context.Context) error {
+func (r *OutboundClient) processSignRequests(ctx context.Context,
+	stream *Stream) error {
+
 	var (
 		reqChan = make(chan *walletrpc.SignCoordinatorRequest)
 		errChan = make(chan error)
 	)
+	// We don't defer closing the channels here because doing so could
+	// cause a race condition in the goroutine below, where it might attempt
+	// to send on a closed channel, leading to a panic. Instead, the garbage
+	// collector will clean up the channels once this function returns and
+	// the goroutine has completed execution.
 
 	// We run the receive loop in a goroutine to ensure we can stop if the
 	// remote signer client is shutting down (i.e. the quit channel is
@@ -640,7 +626,7 @@ func (r *OutboundClient) processSignRequests(streamCtx context.Context) error {
 	// will stop the receive goroutine.
 	err := r.gManager.Go(func(_ context.Context) {
 		for {
-			req, err := r.stream.Recv()
+			req, err := stream.Recv()
 			if err != nil {
 				wrappedErr := fmt.Errorf("error receiving "+
 					"request from watch-only node: %w", err)
@@ -649,18 +635,14 @@ func (r *OutboundClient) processSignRequests(streamCtx context.Context) error {
 				// that we're still listening on the channel.
 				select {
 				case errChan <- wrappedErr:
-				case <-streamCtx.Done():
-				case <-r.quit:
+				case <-ctx.Done():
 				}
 
 				return
 			}
 
 			select {
-			case <-streamCtx.Done():
-				return
-
-			case <-r.quit:
+			case <-ctx.Done():
 				return
 
 			case reqChan <- req:
@@ -677,7 +659,7 @@ func (r *OutboundClient) processSignRequests(streamCtx context.Context) error {
 		select {
 		case req := <-reqChan:
 			// Process the received request.
-			err := r.handleRequest(streamCtx, req)
+			err := r.handleRequest(ctx, req, stream)
 			if err != nil {
 				return err
 			}
@@ -685,8 +667,8 @@ func (r *OutboundClient) processSignRequests(streamCtx context.Context) error {
 		case <-r.quit:
 			return ErrShuttingDown
 
-		case <-streamCtx.Done():
-			return streamCtx.Err()
+		case <-ctx.Done():
+			return ctx.Err()
 
 		case err := <-errChan:
 			return err
@@ -696,8 +678,8 @@ func (r *OutboundClient) processSignRequests(streamCtx context.Context) error {
 
 // handleRequest processes the received request from the watch-only node, and
 // sends the corresponding response back.
-func (r *OutboundClient) handleRequest(streamCtx context.Context,
-	req *walletrpc.SignCoordinatorRequest) error {
+func (r *OutboundClient) handleRequest(ctx context.Context,
+	req *walletrpc.SignCoordinatorRequest, stream *Stream) error {
 
 	log.Debugf("Processing a request from watch-only node of type: %T",
 		req.GetSignRequestType())
@@ -705,7 +687,7 @@ func (r *OutboundClient) handleRequest(streamCtx context.Context,
 	log.Tracef("Request content: %v", formatSignCoordinatorMsg(req))
 
 	// Process the request.
-	resp, err := r.process(streamCtx, req)
+	resp, err := r.process(ctx, req)
 	if err != nil {
 		errStr := "error processing the request in the remote " +
 			"signer: " + err.Error()
@@ -728,7 +710,7 @@ func (r *OutboundClient) handleRequest(streamCtx context.Context,
 	}
 
 	// Send the response back to the watch-only node.
-	err = r.sendResponse(streamCtx, resp)
+	err = r.sendResponse(ctx, resp, stream)
 	if err != nil {
 		return fmt.Errorf("error sending response to watch-only "+
 			"node: %w", err)
@@ -752,7 +734,7 @@ func (r *OutboundClient) process(ctx context.Context,
 		}
 	)
 
-	//nolint:lll
+	//nolint:ll
 	switch reqType := req.GetSignRequestType().(type) {
 	case *walletrpc.SignCoordinatorRequest_SharedKeyRequest:
 		resp, err := r.signerServer.DeriveSharedKey(
@@ -900,8 +882,8 @@ func (r *OutboundClient) process(ctx context.Context,
 
 // sendResponse sends the passed response back to the watch-only node over the
 // stream.
-func (r *OutboundClient) sendResponse(ctx context.Context,
-	resp *signerResponse) error {
+func (r *OutboundClient) sendResponse(ctx context.Context, resp *signerResponse,
+	stream *Stream) error {
 
 	// We send the response in a goroutine to ensure we can return an error
 	// if the send times out or the context is canceled. This is done to
@@ -918,7 +900,7 @@ func (r *OutboundClient) sendResponse(ctx context.Context,
 	defer close(returnedChan)
 
 	err := r.gManager.Go(func(_ context.Context) {
-		err := r.stream.Send(resp)
+		err := stream.Send(resp)
 		if err != nil {
 			select {
 			case errChan <- err:

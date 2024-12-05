@@ -129,7 +129,7 @@ func NewSignCoordinator(requestTimeout time.Duration,
 	return s
 }
 
-// Run starts the SignCoordinator and blocks until the remote signer
+// Run starts the SignCoordinator and blocks until the remote signer either
 // disconnects, the SignCoordinator is shut down, or an error occurs.
 func (s *SignCoordinator) Run(stream StreamServer) error {
 	s.mu.Lock()
@@ -313,7 +313,7 @@ func (s *SignCoordinator) handshake(stream StreamServer) error {
 		// about the watch-only node in the future.
 		RegistrationComplete: &walletrpc.RegistrationComplete{
 			Signature:        "",
-			RegistrationInfo: "outboundWatchOnly",
+			RegistrationInfo: "watch-only registration info",
 		},
 	}
 	// Send a message to the client to indicate that the registration has

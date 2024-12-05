@@ -9,6 +9,7 @@ import (
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/lightningnetwork/lnd/keychain"
+	"github.com/lightningnetwork/lnd/lncfg"
 	"github.com/lightningnetwork/lnd/lnrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/signrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/walletrpc"
@@ -466,15 +467,22 @@ func testOutboundRSMacaroonEnforcement(ht *lntest.HarnessTest) {
 	// The connection should not be allowed using this macaroon because it
 	// lacks the `remotesigner` entity required when the signer node
 	// connects to the watch-only node.
-	streamFeeder := rpcwallet.NewStreamFeeder(
-		watchOnly.Cfg.RPCAddr(), watchOnly.Cfg.InvoiceMacPath,
-		watchOnly.Cfg.TLSCertPath, 10*time.Second,
-	)
+	connectionCfg := lncfg.ConnectionCfg{
+		RPCHost:        watchOnly.Cfg.RPCAddr(),
+		MacaroonPath:   watchOnly.Cfg.InvoiceMacPath,
+		TLSCertPath:    watchOnly.Cfg.TLSCertPath,
+		Timeout:        10 * time.Second,
+		RequestTimeout: 10 * time.Second,
+	}
 
-	stream, cleanup, err := streamFeeder.GetStream(ht.Context())
+	streamFeeder := rpcwallet.NewStreamFeeder(connectionCfg)
+
+	stream, err := streamFeeder.GetStream(ht.Context())
 	require.NoError(ht, err)
 
-	defer cleanup()
+	defer func() {
+		require.NoError(ht, stream.Close())
+	}()
 
 	// Since we're using an unauthorized macaroon, we should expect to be
 	// denied access to the watch-only node.

@@ -56,7 +56,7 @@ type RPCKeyRing struct {
 
 	rpcTimeout time.Duration
 
-	remoteSigner RemoteSigner
+	remoteSignerConn RemoteSignerConnection
 }
 
 var _ keychain.SecretKeyRing = (*RPCKeyRing)(nil)
@@ -69,15 +69,15 @@ var _ lnwallet.WalletController = (*RPCKeyRing)(nil)
 // delegates any signing or ECDH operations to the remove signer through RPC.
 func NewRPCKeyRing(watchOnlyKeyRing keychain.SecretKeyRing,
 	watchOnlyWalletController lnwallet.WalletController,
-	remoteSigner RemoteSigner,
+	remoteSignerConn RemoteSignerConnection,
 	netParams *chaincfg.Params) (*RPCKeyRing, error) {
 
 	return &RPCKeyRing{
 		WalletController: watchOnlyWalletController,
 		watchOnlyKeyRing: watchOnlyKeyRing,
 		netParams:        netParams,
-		rpcTimeout:       remoteSigner.Timeout(),
-		remoteSigner:     remoteSigner,
+		rpcTimeout:       remoteSignerConn.Timeout(),
+		remoteSignerConn: remoteSignerConn,
 	}, nil
 }
 
@@ -188,9 +188,9 @@ func (r *RPCKeyRing) SignPsbt(packet *psbt.Packet) ([]uint32, error) {
 		return nil, fmt.Errorf("error serializing PSBT: %w", err)
 	}
 
-	resp, err := r.remoteSigner.SignPsbt(ctxt, &walletrpc.SignPsbtRequest{
-		FundedPsbt: buf.Bytes(),
-	})
+	resp, err := r.remoteSignerConn.SignPsbt(ctxt,
+		&walletrpc.SignPsbtRequest{FundedPsbt: buf.Bytes()},
+	)
 	if err != nil {
 		considerShutdown(err)
 		return nil, fmt.Errorf("error signing PSBT in remote signer "+
@@ -401,7 +401,7 @@ func (r *RPCKeyRing) ECDH(keyDesc keychain.KeyDescriptor,
 		req.KeyDesc.RawKeyBytes = keyDesc.PubKey.SerializeCompressed()
 	}
 
-	resp, err := r.remoteSigner.DeriveSharedKey(ctxt, req)
+	resp, err := r.remoteSignerConn.DeriveSharedKey(ctxt, req)
 	if err != nil {
 		considerShutdown(err)
 		return key, fmt.Errorf("error deriving shared key in remote "+
@@ -424,14 +424,16 @@ func (r *RPCKeyRing) SignMessage(keyLoc keychain.KeyLocator,
 	ctxt, cancel := context.WithTimeout(context.Background(), r.rpcTimeout)
 	defer cancel()
 
-	resp, err := r.remoteSigner.SignMessage(ctxt, &signrpc.SignMessageReq{
-		Msg: msg,
-		KeyLoc: &signrpc.KeyLocator{
-			KeyFamily: int32(keyLoc.Family),
-			KeyIndex:  int32(keyLoc.Index),
+	resp, err := r.remoteSignerConn.SignMessage(ctxt,
+		&signrpc.SignMessageReq{
+			Msg: msg,
+			KeyLoc: &signrpc.KeyLocator{
+				KeyFamily: int32(keyLoc.Family),
+				KeyIndex:  int32(keyLoc.Index),
+			},
+			DoubleHash: doubleHash,
 		},
-		DoubleHash: doubleHash,
-	})
+	)
 	if err != nil {
 		considerShutdown(err)
 		return nil, fmt.Errorf("error signing message in remote "+
@@ -470,15 +472,17 @@ func (r *RPCKeyRing) SignMessageCompact(keyLoc keychain.KeyLocator,
 	ctxt, cancel := context.WithTimeout(context.Background(), r.rpcTimeout)
 	defer cancel()
 
-	resp, err := r.remoteSigner.SignMessage(ctxt, &signrpc.SignMessageReq{
-		Msg: msg,
-		KeyLoc: &signrpc.KeyLocator{
-			KeyFamily: int32(keyLoc.Family),
-			KeyIndex:  int32(keyLoc.Index),
+	resp, err := r.remoteSignerConn.SignMessage(ctxt,
+		&signrpc.SignMessageReq{
+			Msg: msg,
+			KeyLoc: &signrpc.KeyLocator{
+				KeyFamily: int32(keyLoc.Family),
+				KeyIndex:  int32(keyLoc.Index),
+			},
+			DoubleHash: doubleHash,
+			CompactSig: true,
 		},
-		DoubleHash: doubleHash,
-		CompactSig: true,
-	})
+	)
 	if err != nil {
 		considerShutdown(err)
 		return nil, fmt.Errorf("error signing message in remote "+
@@ -503,17 +507,19 @@ func (r *RPCKeyRing) SignMessageSchnorr(keyLoc keychain.KeyLocator,
 	ctxt, cancel := context.WithTimeout(context.Background(), r.rpcTimeout)
 	defer cancel()
 
-	resp, err := r.remoteSigner.SignMessage(ctxt, &signrpc.SignMessageReq{
-		Msg: msg,
-		KeyLoc: &signrpc.KeyLocator{
-			KeyFamily: int32(keyLoc.Family),
-			KeyIndex:  int32(keyLoc.Index),
+	resp, err := r.remoteSignerConn.SignMessage(ctxt,
+		&signrpc.SignMessageReq{
+			Msg: msg,
+			KeyLoc: &signrpc.KeyLocator{
+				KeyFamily: int32(keyLoc.Family),
+				KeyIndex:  int32(keyLoc.Index),
+			},
+			DoubleHash:         doubleHash,
+			SchnorrSig:         true,
+			SchnorrSigTapTweak: taprootTweak,
+			Tag:                tag,
 		},
-		DoubleHash:         doubleHash,
-		SchnorrSig:         true,
-		SchnorrSigTapTweak: taprootTweak,
-		Tag:                tag,
-	})
+	)
 	if err != nil {
 		considerShutdown(err)
 		return nil, fmt.Errorf("error signing message in remote "+
@@ -698,7 +704,7 @@ func (r *RPCKeyRing) MuSig2CreateSession(bipVersion input.MuSig2Version,
 	ctxt, cancel := context.WithTimeout(context.Background(), r.rpcTimeout)
 	defer cancel()
 
-	resp, err := r.remoteSigner.MuSig2CreateSession(ctxt, req)
+	resp, err := r.remoteSignerConn.MuSig2CreateSession(ctxt, req)
 	if err != nil {
 		considerShutdown(err)
 		return nil, fmt.Errorf("error creating MuSig2 session in "+
@@ -752,7 +758,7 @@ func (r *RPCKeyRing) MuSig2RegisterNonces(sessionID input.MuSig2SessionID,
 	ctxt, cancel := context.WithTimeout(context.Background(), r.rpcTimeout)
 	defer cancel()
 
-	resp, err := r.remoteSigner.MuSig2RegisterNonces(ctxt, req)
+	resp, err := r.remoteSignerConn.MuSig2RegisterNonces(ctxt, req)
 	if err != nil {
 		considerShutdown(err)
 		return false, fmt.Errorf("error registering MuSig2 nonces in "+
@@ -783,7 +789,7 @@ func (r *RPCKeyRing) MuSig2Sign(sessionID input.MuSig2SessionID,
 	ctxt, cancel := context.WithTimeout(context.Background(), r.rpcTimeout)
 	defer cancel()
 
-	resp, err := r.remoteSigner.MuSig2Sign(ctxt, req)
+	resp, err := r.remoteSignerConn.MuSig2Sign(ctxt, req)
 	if err != nil {
 		considerShutdown(err)
 		return nil, fmt.Errorf("error signing MuSig2 session in "+
@@ -827,7 +833,7 @@ func (r *RPCKeyRing) MuSig2CombineSig(sessionID input.MuSig2SessionID,
 	ctxt, cancel := context.WithTimeout(context.Background(), r.rpcTimeout)
 	defer cancel()
 
-	resp, err := r.remoteSigner.MuSig2CombineSig(ctxt, req)
+	resp, err := r.remoteSignerConn.MuSig2CombineSig(ctxt, req)
 	if err != nil {
 		considerShutdown(err)
 		return nil, false, fmt.Errorf("error combining MuSig2 "+
@@ -851,23 +857,18 @@ func (r *RPCKeyRing) MuSig2CombineSig(sessionID input.MuSig2SessionID,
 
 // RemoteSigner returns the remote signer instance that is used by the RPC key
 // ring to sign transactions.
-func (r *RPCKeyRing) RemoteSigner() RemoteSigner {
-	return r.remoteSigner
+func (r *RPCKeyRing) RemoteSigner() RemoteSignerConnection {
+	return r.remoteSignerConn
 }
 
-// RequireReady waits until the remote signer is ready to sign transactions, and
-// returns an error if we time out while waiting. This method overrides/shadows
-// the default implementation of the WalletController interface.
+// ReadySignal returns a channel that signals once the wallet is ready to be
+// used, i.e. once the remote signer is connected. If we time out while waiting,
+// an error gets sent over the channel. This method overrides/shadows the
+// default implementation of the WalletController interface.
 //
 // NOTE: This method is part of the WalletController interface.
 func (r *RPCKeyRing) ReadySignal() chan error {
-	readyChan := make(chan error, 1)
-
-	go func() {
-		readyChan <- r.remoteSigner.Ready()
-	}()
-
-	return readyChan
+	return r.remoteSignerConn.Ready()
 }
 
 // MuSig2Cleanup removes a session from memory to free up resources.
@@ -879,7 +880,7 @@ func (r *RPCKeyRing) MuSig2Cleanup(sessionID input.MuSig2SessionID) error {
 	ctxt, cancel := context.WithTimeout(context.Background(), r.rpcTimeout)
 	defer cancel()
 
-	_, err := r.remoteSigner.MuSig2Cleanup(ctxt, req)
+	_, err := r.remoteSignerConn.MuSig2Cleanup(ctxt, req)
 	if err != nil {
 		considerShutdown(err)
 		return fmt.Errorf("error cleaning up MuSig2 session in remote "+
@@ -1178,7 +1179,7 @@ func (r *RPCKeyRing) remoteSign(tx *wire.MsgTx, signDesc *input.SignDescriptor,
 		return nil, fmt.Errorf("error serializing PSBT: %w", err)
 	}
 
-	resp, err := r.remoteSigner.SignPsbt(
+	resp, err := r.remoteSignerConn.SignPsbt(
 		ctxt, &walletrpc.SignPsbtRequest{FundedPsbt: buf.Bytes()},
 	)
 	if err != nil {

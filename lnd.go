@@ -498,9 +498,7 @@ func Main(cfg *Config, lisCfg ListenerCfg, implCfg *ImplementationCfg,
 	// To ensure that a potential remote signer can connect to lnd before we
 	// can handle other requests, we set the interceptor chain to be ready
 	// accept remote signer connections, if enabled by the cfg.
-	if cfg.RemoteSigner.Enable &&
-		cfg.RemoteSigner.SignerRole == lncfg.OutboundWatchOnlyRole {
-
+	if cfg.RemoteSigner.AllowInboundConnection {
 		interceptorChain.SetAllowRemoteSigner()
 	}
 
@@ -516,10 +514,10 @@ func Main(cfg *Config, lisCfg ListenerCfg, implCfg *ImplementationCfg,
 	case <-interceptor.ShutdownChannel():
 		// If we receive a shutdown signal while waiting for the wallet
 		// to be ready, we must stop blocking so that all the deferred
-		// clean up functions can be executed. That will also shutdown
+		// clean up functions can be executed. That will also shut down
 		// the wallet.
-		// We can't continue execute the code below as we can't generate
-		// any keys which.
+		// We can't continue to execute the code below as we can't
+		// do any operations which requires private keys.
 		return mkErr("Shutdown signal received while waiting for " +
 			"wallet to be ready.")
 	}
@@ -648,7 +646,7 @@ func Main(cfg *Config, lisCfg ListenerCfg, implCfg *ImplementationCfg,
 	// Set up the remote signer client. If the
 	// cfg.RemoteSigner.SignerRole != lncfg.OutboundSignerRole, this remote
 	// signer client won't run when the server starts.
-	rscBuilder := rpcwallet.NewRemoteSignerClientBuilder(cfg.RemoteSigner)
+	rscBuilder := rpcwallet.NewRemoteSignerClientBuilder(cfg.WatchOnlyNode)
 
 	rsClient, err := rscBuilder.Build(rpcServer.subServers)
 	if err != nil {

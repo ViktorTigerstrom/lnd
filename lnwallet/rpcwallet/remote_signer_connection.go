@@ -8,10 +8,13 @@ import (
 	"os"
 	"time"
 
+	"github.com/lightningnetwork/lnd/keychain"
+	"github.com/lightningnetwork/lnd/lncfg"
 	"github.com/lightningnetwork/lnd/lnrpc/signrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/walletrpc"
 	"github.com/lightningnetwork/lnd/macaroons"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
 	"gopkg.in/macaroon.v2"
 )
@@ -21,10 +24,11 @@ type (
 	StreamServer = walletrpc.WalletKit_SignCoordinatorStreamsServer
 )
 
-// RemoteSigner is an interface that abstracts the communication with a remote
-// signer. It extends the RemoteSignerRequests, and adds some additional methods
-// to manage the connection and verify the health of the remote signer.
-type RemoteSigner interface {
+// RemoteSignerConnection is an interface that abstracts the communication with
+// a remote signer. It extends the RemoteSignerRequests, and adds som
+// additional methods to manage the connection and verify the health of the
+// remote signer.
+type RemoteSignerConnection interface {
 	// RemoteSignerRequests is an interface that defines the requests that
 	// can be sent to a remote signer.
 	RemoteSignerRequests
@@ -32,12 +36,15 @@ type RemoteSigner interface {
 	// Timeout returns the set connection timeout for the remote signer.
 	Timeout() time.Duration
 
-	// Ready blocks and returns nil when the remote signer is ready to
-	// accept requests.
-	Ready() error
+	// Ready returns a channel that nil gets sent over once the remote
+	// signer is ready to accept requests.
+	Ready() chan error
+
+	// Stop gracefully disconnects from the remote signer.
+	Stop()
 
 	// Ping verifies that the remote signer is still responsive.
-	Ping(timeout time.Duration) error
+	Ping(timeout time.Duration, ctx context.Context) error
 
 	// Run feeds lnd with the incoming stream set up by an outbound remote
 	// signer and then blocks until the stream is closed. Lnd can then send
@@ -99,111 +106,124 @@ type RemoteSignerRequests interface {
 		opts ...grpc.CallOption) (*walletrpc.SignPsbtResponse, error)
 }
 
-// InboundRemoteSigner is an abstraction of the connection to an inbound remote
-// signer. An inbound remote signer is a remote signer that allows the
-// watch-only node to connect to it via an inbound GRPC connection.
-type InboundRemoteSigner struct {
+// OutboundConnection is an abstraction of the outbound connection made to an
+// inbound remote signer. An inbound remote signer is a remote signer that
+// allows the watch-only node to connect to it via an inbound GRPC connection.
+type OutboundConnection struct {
 	// Embedded signrpc.SignerClient and walletrpc.WalletKitClient to
 	// implement the RemoteSigner interface.
 	signrpc.SignerClient
-
 	walletrpc.WalletKitClient
 
-	// The host:port of the remote signer node.
-	rpcHost string
+	// The ConnectionCfg containing connection details of the remote signer.
+	cfg lncfg.ConnectionCfg
 
-	// The path to the TLS certificate of the remote signer node.
-	tlsCertPath string
-
-	// The path to the macaroon of the remote signer node.
-	macaroonPath string
-
-	// The timeout for the connection to the remote signer node.
-	timeout time.Duration
+	// conn represents the connection to the remote signer.
+	conn *grpc.ClientConn
 }
 
-// NewInboundRemoteSigner creates a new InboundRemoteSigner instance.
+// NewOutboundConnection creates a new OutboundConnection instance.
 // The function sets up a connection to the remote signer node.
-// The returned function is a cleanup function that should be called to close
-// the connection when the remote signer is no longer needed.
-func NewInboundRemoteSigner(rpcHost string, tlsCertPath string,
-	macaroonPath string,
-	timeout time.Duration) (*InboundRemoteSigner, func(), error) {
+func NewOutboundConnection(ctx context.Context,
+	cfg lncfg.ConnectionCfg) (*OutboundConnection, error) {
 
-	rpcConn, err := connectRPC(rpcHost, tlsCertPath, macaroonPath, timeout)
+	rpcConn, err := connectRPC(
+		ctx, cfg.RPCHost, cfg.TLSCertPath, cfg.MacaroonPath,
+		cfg.Timeout,
+	)
 	if err != nil {
-		return nil, nil, fmt.Errorf("error connecting to the remote "+
+		return nil, fmt.Errorf("error connecting to the remote "+
 			"signing node through RPC: %v", err)
 	}
 
-	cleanUp := func() {
-		rpcConn.Close()
-	}
-
-	remoteSigner := &InboundRemoteSigner{
+	remoteSigner := &OutboundConnection{
 		SignerClient:    signrpc.NewSignerClient(rpcConn),
 		WalletKitClient: walletrpc.NewWalletKitClient(rpcConn),
-		rpcHost:         rpcHost,
-		tlsCertPath:     tlsCertPath,
-		macaroonPath:    macaroonPath,
-		timeout:         timeout,
+		conn:            rpcConn,
+		cfg:             cfg,
 	}
 
-	return remoteSigner, cleanUp, nil
+	return remoteSigner, nil
 }
 
 // Run feeds lnd with the incoming stream set up by an outbound remote signer
 // and then blocks until the stream is closed. Lnd can then send any requests to
 // the remote signer through the stream.
 //
-// NOTE: This is part of the RemoteSigner interface.
-func (*InboundRemoteSigner) Run(_ StreamServer) error {
+// NOTE: This is part of the RemoteSignerConnection interface.
+func (*OutboundConnection) Run(_ StreamServer) error {
 	// If lnd has been configured to use an inbound remote signer, it should
 	// not allow an outbound remote signer to connect.
 	return errors.New("not supported when remotesigner.signerrole is set " +
 		"to \"watchonly-inbound\"")
 }
 
-// Ready blocks and returns nil when the remote signer is ready to accept
-// requests.
+// Ready returns a channel that nil gets sent over once the connection to the
+// remote signer is set up and the remote signer is ready to accept requests.
 //
-// NOTE: This is part of the RemoteSigner interface.
-func (r *InboundRemoteSigner) Ready() error {
+// NOTE: This is part of the RemoteSignerConnection interface.
+func (r *OutboundConnection) Ready() chan error {
 	// The inbound remote signer is ready as soon we have connected to the
-	// remote signer node in the constructor. Therefore, we always return
+	// remote signer node in the constructor. Therefore, we always send
 	// nil here to signal that we are ready.
-	return nil
+	readyChan := make(chan error, 1)
+	readyChan <- nil
+
+	return readyChan
 }
 
 // Ping verifies that the remote signer is still responsive.
 //
-// NOTE: This is part of the RemoteSigner interface.
-func (r *InboundRemoteSigner) Ping(timeout time.Duration) error {
-	conn, err := connectRPC(
-		r.rpcHost, r.tlsCertPath, r.macaroonPath, timeout,
-	)
-	if err != nil {
-		return fmt.Errorf("error connecting to the remote "+
-			"signing node through RPC: %v", err)
+// NOTE: This is part of the RemoteSignerConnection interface.
+func (r *OutboundConnection) Ping(_ time.Duration, ctx context.Context) error {
+	if r.conn == nil || r.conn.GetState() != connectivity.Ready {
+		return errors.New("remote signer is not connected")
 	}
 
-	return conn.Close()
+	pingMsg := []byte("ping test")
+	keyLoc := &signrpc.KeyLocator{
+		KeyFamily: int32(keychain.KeyFamilyNodeKey),
+		KeyIndex:  1,
+	}
+
+	// Sign a message with the default ECDSA.
+	signMsgReq := &signrpc.SignMessageReq{
+		Msg:        pingMsg,
+		KeyLoc:     keyLoc,
+		SchnorrSig: false,
+	}
+
+	_, err := r.SignMessage(ctx, signMsgReq)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // Timeout returns the set connection timeout for the remote signer.
 //
-// NOTE: This is part of the RemoteSigner interface.
-func (r *InboundRemoteSigner) Timeout() time.Duration {
-	return r.timeout
+// NOTE: This is part of the RemoteSignerConnection interface.
+func (r *OutboundConnection) Timeout() time.Duration {
+	return r.cfg.Timeout
 }
 
-// A compile time assertion to ensure InboundRemoteSigner meets the
-// RemoteSigner interface.
-var _ RemoteSigner = (*InboundRemoteSigner)(nil)
+// Stop closes the connection to the remote signer.
+//
+// NOTE: This is part of the RemoteSignerConnection interface.
+func (r *OutboundConnection) Stop() {
+	if r.conn != nil {
+		r.conn.Close()
+	}
+}
+
+// A compile time assertion to ensure OutboundConnection meets the
+// RemoteSignerConnection interface.
+var _ RemoteSignerConnection = (*OutboundConnection)(nil)
 
 // connectRPC tries to establish an RPC connection to the given host:port with
 // the supplied certificate and macaroon.
-func connectRPC(hostPort, tlsCertPath, macaroonPath string,
+func connectRPC(ctx context.Context, hostPort, tlsCertPath, macaroonPath string,
 	timeout time.Duration) (*grpc.ClientConn, error) {
 
 	certBytes, err := os.ReadFile(tlsCertPath)
@@ -241,7 +261,7 @@ func connectRPC(hostPort, tlsCertPath, macaroonPath string,
 		grpc.WithBlock(),
 	}
 
-	ctxt, cancel := context.WithTimeout(context.Background(), timeout)
+	ctxt, cancel := context.WithTimeout(ctx, timeout)
 
 	// In the blocking case, ctx can be used to cancel or expire the pending
 	// connection. Once this function returns, the cancellation and
@@ -258,19 +278,19 @@ func connectRPC(hostPort, tlsCertPath, macaroonPath string,
 	return conn, nil
 }
 
-// OutboundRemoteSigner references a remote signer that makes an outbound
-// connection to a watch-only node.
-type OutboundRemoteSigner struct {
+// InboundConnection is an abstraction that manages the inbound connection that
+// is set up by an outbound remote signer that connects to the watch-only node.
+type InboundConnection struct {
 	*SignCoordinator
 
 	connectionTimeout time.Duration
 }
 
-// NewOutboundRemoteSigner creates a new OutboundRemoteSigner instance.
-func NewOutboundRemoteSigner(requestTimeout time.Duration,
-	connectionTimeout time.Duration) (*OutboundRemoteSigner, func()) {
+// NewInboundConnection creates a new InboundConnection instance.
+func NewInboundConnection(requestTimeout time.Duration,
+	connectionTimeout time.Duration) *InboundConnection {
 
-	remoteSigner := &OutboundRemoteSigner{
+	remoteSigner := &InboundConnection{
 		connectionTimeout: connectionTimeout,
 	}
 
@@ -278,33 +298,44 @@ func NewOutboundRemoteSigner(requestTimeout time.Duration,
 		requestTimeout, connectionTimeout,
 	)
 
-	return remoteSigner, remoteSigner.Stop
+	return remoteSigner
 }
 
 // Timeout returns the set connection timeout for the remote signer.
 //
-// NOTE: This is part of the RemoteSigner interface.
-func (r *OutboundRemoteSigner) Timeout() time.Duration {
+// NOTE: This is part of the RemoteSignerConnection interface.
+func (r *InboundConnection) Timeout() time.Duration {
 	return r.connectionTimeout
 }
 
-// Ready blocks and returns nil when the remote signer is ready to accept
-// requests.
+// Ready returns a channel that nil gets sent over once the remote signer
+// connected and is ready to accept requests.
 //
-// NOTE: This is part of the RemoteSigner interface.
-func (r *OutboundRemoteSigner) Ready() error {
-	log.Infof("Waiting for the remote signer to connect")
+// NOTE: This is part of the RemoteSignerConnection interface.
+func (r *InboundConnection) Ready() chan error {
+	readyChan := make(chan error, 1)
 
-	return r.SignCoordinator.WaitUntilConnected()
+	// We wait for the remote signer to connect in a go func and signal
+	// over the channel once it's ready.
+	go func() {
+		log.Infof("Waiting for the remote signer to connect")
+
+		readyChan <- r.SignCoordinator.WaitUntilConnected()
+		close(readyChan)
+	}()
+
+	return readyChan
 }
 
 // Ping verifies that the remote signer is still responsive.
 //
-// NOTE: This is part of the RemoteSigner interface.
-func (r *OutboundRemoteSigner) Ping(timeout time.Duration) error {
+// NOTE: This is part of the RemoteSignerConnection interface.
+func (r *InboundConnection) Ping(timeout time.Duration,
+	_ context.Context) error {
+
 	pong, err := r.SignCoordinator.Ping(timeout)
 	if err != nil {
-		return fmt.Errorf("Ping request to remote signer "+
+		return fmt.Errorf("ping request to remote signer "+
 			"errored: %w", err)
 	}
 
@@ -315,15 +346,6 @@ func (r *OutboundRemoteSigner) Ping(timeout time.Duration) error {
 	return nil
 }
 
-// Run feeds lnd with the incoming stream that an outbound remote signer has set
-// up, and blocks until the stream is closed. Lnd can then proceed to send any
-// requests to the remote signer through the stream.
-//
-// NOTE: This is part of the RemoteSigner interface.
-func (r *OutboundRemoteSigner) Run(stream StreamServer) error {
-	return r.SignCoordinator.Run(stream)
-}
-
-// A compile time assertion to ensure OutboundRemoteSigner meets the
+// A compile time assertion to ensure InboundConnection meets the
 // RemoteSigner interface.
-var _ RemoteSigner = (*OutboundRemoteSigner)(nil)
+var _ RemoteSignerConnection = (*InboundConnection)(nil)

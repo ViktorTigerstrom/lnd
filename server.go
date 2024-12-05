@@ -1941,7 +1941,7 @@ func (s *server) createLivenessMonitor(cfg *Config, cc *chainreg.ChainControl,
 
 	// If remote signing is enabled, add the healthcheck for the remote
 	// signing RPC interface.
-	if s.cfg.RemoteSigner != nil && s.cfg.RemoteSigner.Enable {
+	if s.cfg.RemoteSigner.Enable {
 		if rpckKeyRing, ok := cc.Wc.(*rpcwallet.RPCKeyRing); ok {
 			timeout := cfg.HealthChecks.RemoteSigner.Timeout
 
@@ -1959,6 +1959,7 @@ func (s *server) createLivenessMonitor(cfg *Config, cc *chainreg.ChainControl,
 					// connect, so we use the health check
 					// timeout.
 					timeout,
+					context.Background(),
 				),
 				cfg.HealthChecks.RemoteSigner.Interval,
 				outerTimeout,
