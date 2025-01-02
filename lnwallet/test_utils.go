@@ -710,7 +710,7 @@ func GetCommitmentOutChecker(t *testing.T, chanType channeldb.ChannelType,
 			// Check if this is an HTLC for our commit. We try all four
 			// possible variations and return if we succeed at matching.
 			if hasRHash && hasCommitPoint && hasCltv {
-				scriptInfo, err := genHtlcScript(
+				scriptInfo, err := GenHtlcScript(
 					chanType, true, lntypes.Local, cltv, rHash,
 					keyRingOurCommit,
 				)
@@ -719,7 +719,7 @@ func GetCommitmentOutChecker(t *testing.T, chanType channeldb.ChannelType,
 					return nil
 				}
 
-				scriptInfo, err = genHtlcScript(
+				scriptInfo, err = GenHtlcScript(
 					chanType, false, lntypes.Local, cltv, rHash,
 					keyRingOurCommit,
 				)
@@ -728,7 +728,7 @@ func GetCommitmentOutChecker(t *testing.T, chanType channeldb.ChannelType,
 					return nil
 				}
 
-				scriptInfo, err = genHtlcScript(
+				scriptInfo, err = GenHtlcScript(
 					chanType, true, lntypes.Remote, cltv, rHash,
 					keyRingTheirCommit,
 				)
@@ -737,7 +737,7 @@ func GetCommitmentOutChecker(t *testing.T, chanType channeldb.ChannelType,
 					return nil
 				}
 
-				scriptInfo, err = genHtlcScript(
+				scriptInfo, err = GenHtlcScript(
 					chanType, false, lntypes.Remote, cltv, rHash,
 					keyRingTheirCommit,
 				)

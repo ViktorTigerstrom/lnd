@@ -131,6 +131,15 @@ var (
 		"/signrpc.Signer/MuSig2Sign":           {},
 		"/signrpc.Signer/SignMessage":          {},
 
+		// Required methods to whitelist outbound funds for the remote
+		// signing validator.
+		"/remotesignerrpc.RemoteSigner/WhitelistAddress":             {},
+		"/remotesignerrpc.RemoteSigner/WhitelistedAddresses":         {},
+		"/remotesignerrpc.RemoteSigner/RemoveWhitelistedAddress":     {},
+		"/remotesignerrpc.RemoteSigner/WhitelistPaymentHash":         {},
+		"/remotesignerrpc.RemoteSigner/WhitelistedPaymentHashes":     {},
+		"/remotesignerrpc.RemoteSigner/RemoveWhitelistedPaymentHash": {},
+
 		// Macaroon methods. An inbound remote signer needs to create a
 		// macaroon for the watch-only node.
 		"/lnrpc.Lightning/BakeMacaroon":             {},

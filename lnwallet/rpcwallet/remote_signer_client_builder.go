@@ -1,31 +1,38 @@
 package rpcwallet
 
 import (
+	"fmt"
+	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/lightningnetwork/lnd/lncfg"
 	"github.com/lightningnetwork/lnd/lnrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/signrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/walletrpc"
+	"github.com/lightningnetwork/lnd/lnwallet/validator"
 )
 
-type rscBuilder = RemoteSignerClientBuilder
+type RscBuilder = RemoteSignerClientBuilder
 
 // RemoteSignerClientBuilder creates instances of the RemoteSignerClient
 // interface, based on the provided configuration.
 type RemoteSignerClientBuilder struct {
-	cfg *lncfg.WatchOnlyNode
+	watchOnlyCfg  *lncfg.WatchOnlyNode
+	validationCfg *lncfg.Validation
 }
 
 // NewRemoteSignerClientBuilder creates a new instance of the
 // RemoteSignerClientBuilder.
-func NewRemoteSignerClientBuilder(cfg *lncfg.WatchOnlyNode) *rscBuilder {
-	return &rscBuilder{cfg}
+func NewRemoteSignerClientBuilder(woCfg *lncfg.WatchOnlyNode,
+	vCfg *lncfg.Validation) *RscBuilder {
+
+	return &RscBuilder{woCfg, vCfg}
 }
 
 // Build creates a new RemoteSignerClient instance. If the configuration enables
 // an outbound remote signer, a new OutboundRemoteSignerClient will be returned.
 // Else, a NoOpClient will be returned.
-func (b *rscBuilder) Build(subServers []lnrpc.SubServer) (
-	RemoteSignerClient, error) {
+func (b *RscBuilder) Build(subServers []lnrpc.SubServer,
+	remoteSignerDB validator.RemoteSignerDB,
+	network *chaincfg.Params) (RemoteSignerClient, error) {
 
 	var (
 		walletServer walletrpc.WalletKitServer
@@ -51,19 +58,46 @@ func (b *rscBuilder) Build(subServers []lnrpc.SubServer) (
 		return &NoOpClient{}, nil
 	}
 
-	if !b.cfg.Enable {
+	if !b.watchOnlyCfg.Enable {
 		log.Debugf("Using a No Op remote signer client due to the " +
 			"current watchonly config")
 
 		return &NoOpClient{}, nil
 	}
 
+	rsValidator, err := b.buildValidator(remoteSignerDB, network)
+	if err != nil {
+		return &NoOpClient{}, err
+	}
+
 	// An outbound remote signer client is enabled, therefore we create one.
 	log.Debugf("Using an outbound remote signer client")
 
-	streamFeeder := NewStreamFeeder(b.cfg.ConnectionCfg)
+	streamFeeder := NewStreamFeeder(b.watchOnlyCfg.ConnectionCfg)
 
-	return NewOutboundClient(
-		walletServer, signerServer, streamFeeder, b.cfg.RequestTimeout,
+	rsClient, err := NewOutboundClient(
+		walletServer, signerServer, streamFeeder, rsValidator,
+		b.watchOnlyCfg.RequestTimeout,
 	)
+	if err != nil {
+		return &NoOpClient{}, err
+	}
+
+	return rsClient, err
+}
+
+func (b *RscBuilder) buildValidator(remoteSignerDB validator.RemoteSignerDB,
+	network *chaincfg.Params) (validator.Validation, error) {
+
+	switch b.validationCfg.Mode {
+	case lncfg.HalfValidationMode:
+		return validator.NewHalfValidator(
+			remoteSignerDB, network, b.validationCfg.AllowFunding,
+		), nil
+	case lncfg.BlindValidationMode:
+		return validator.NewBlindValidator(remoteSignerDB, network), nil
+	default:
+		return nil, fmt.Errorf("unsupported validation mode: %s",
+			b.validationCfg.Mode)
+	}
 }

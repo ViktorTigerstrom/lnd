@@ -9,6 +9,13 @@ import (
 	"time"
 )
 
+type AddressWhitelist struct {
+	ID         int64
+	Address    string
+	AmountMsat int64
+	CreatedAt  time.Time
+}
+
 type AmpSubInvoice struct {
 	SetID       []byte
 	State       int16
@@ -26,6 +33,33 @@ type AmpSubInvoiceHtlc struct {
 	ChildIndex int64
 	Hash       []byte
 	Preimage   []byte
+}
+
+type ChannelConfig struct {
+	ID                    int64
+	ChanReserveSat        int64
+	MaxPendingAmtMsat     int64
+	MinHtlc               int64
+	MaxAcceptedHtlcs      int32
+	DustLimit             int64
+	CsvDelay              int32
+	MultiSigKeyID         int64
+	RevocationBasePointID int64
+	PaymentBasePointID    int64
+	DelayBasePointID      int64
+	HtlcBasePointID       int64
+}
+
+type ChannelInfo struct {
+	ID                    int64
+	TxidBytes             []byte
+	TxidStr               string
+	OutputIndex           int32
+	ChannelType           int64
+	IsLocalInitiator      bool
+	LocalChannelConfigID  int64
+	RemoteChannelConfigID int64
+	CreatedAt             time.Time
 }
 
 type Invoice struct {
@@ -98,7 +132,30 @@ type InvoiceSequence struct {
 	CurrentValue int64
 }
 
+type KeyDescriptor struct {
+	ID          int64
+	RawKeyBytes []byte
+	KeyFamily   int32
+	KeyIndex    int32
+}
+
+type LocalCommitment struct {
+	ID                  int64
+	CommitmentTxPackage []byte
+	FundingTxid         []byte
+	FundingOutputIndex  int32
+	CommitmentHeight    int64
+	CreatedAt           time.Time
+}
+
 type MigrationTracker struct {
 	Version       int32
 	MigrationTime time.Time
+}
+
+type PaymentHashWhitelist struct {
+	ID          int64
+	PaymentHash []byte
+	AmountMsat  int64
+	CreatedAt   time.Time
 }

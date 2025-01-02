@@ -360,7 +360,148 @@ environments, you will also need to copy the watch-only node's TLS certificate
 and place it in the path specified for the `watchonlynode.tlscertpath`
 configuration field in Step 1.
 
-## Migrating an existing setup to remote signing
+## Remote signing validation
+When the node acts as an outbound remote signer, `lnd` supports different
+modes of remote signing validation.
+
+### Blind Validation mode
+
+The default mode is blind. In this mode, the remote signer blindly signs all
+transactions it receives. This implies a high level of trust in the host of the
+watch-only node, as the remote signer will sign any transaction sent to it, even
+those that may drain all funds from the remote signer node.
+
+### Half Validation mode
+
+The second mode is `half` validation. In this mode, the remote signer only signs
+transactions where all outbound funds from the node have been explicitly
+whitelisted.
+
+That means that for outputs with outbound funds to on-chain addresses, the
+addresses must be whitelisted on the remote signer before it'll pass the
+validation and be signed.
+Similarly, for outbound Lightning transactions, the payment hash must be
+pre-whitelisted for the remote signer to authorize the updated channel state
+containing an outbound HTLC with that payment hash.
+
+For channel-related transactions, the remote signer also verifies that:
+- All output keys are derived from the appropriate channel party.
+- The output scripts match the expected format based on the channel type.
+- The transaction is not an old (revoked) channel state.
+
+This mode is primarily intended for use cases where the node acts as an edge
+node, such as in an end-user mobile wallet. It is not recommended for routing
+nodes, as each forwarding of an HTLC would need to be whitelisted prior to
+forwarding, making this impractical.
+
+Compared to the `blind` mode, `half` validation requires significantly less
+trust in the host of the watch-only node. For example, in a scenario where an
+end user runs the remote signer on a mobile wallet and connects to a wallet
+provider hosting the watch-only node, the user can be confident that even if the
+watch-only node is hacked, any attempt to initiate unauthorized outbound
+transactions will be rejected by the user's wallet unless they have been
+whitelisted.
+
+However, some trust elements are still required. In cases where the wallet
+provider both hosts the watch-only node and is also the remote peer in the
+user’s channels, the wallet provider could in theory shift funds from the user’s
+side to their own, without using HTLCs, by updating the commitment state in a
+non-standard and non-lnd-supported way. Such fraudulent behavior is not
+detectable by the `half` validation mode.
+
+### Taproot assets in Half validation mode
+
+While `half` validation mode supports Taproot channels (when
+`protocol.simple-taproot-chans` is enabled on both the signer and the watch-only
+node), it **does not** currently support validation for Taproot asset
+transactions.
+
+If you require support for Taproot assets validation, please let us know as we
+may expand the implementation based on demand.
+
+### Configuration Example for Half Validation Mode
+To enable `half` validation mode on an outbound remote signer, add the following
+to the signer's configuration (in addition to the other options outlined in
+the [outbound remote signer example](#outbound-remote-signer-example)):
+
+```text
+db.backend=sqlite
+db.use-native-sql=true
+
+[validation]
+validation.mode=half
+```
+
+If you want the node to be able to initiate channel openings, you must also
+enable the following:
+
+```text
+validation.allowfunding=true
+```
+
+**Warning:** Enabling `validation.allowfunding=true` will make the validator
+authorize channel openings to any peer. If an attacker compromises the
+watch-only node, they could open channels to nodes they control. This introduces
+security risks described in the [Half Validation Mode](#half-validation-mode)
+section, as the hacker then controls both the watch-only node and the remote
+peer. It is therefore recommended to keep this flag disabled for the majority of
+the time.
+
+### Whitelisting examples in Half Validation mode
+#### Address whitelist
+Run the following command on the remote signer to whitelist an address:
+```shell
+signer> $ lncli remotesigner addresswhitelist add --address=bcrt1qgw53pncdudec2g74gtnzr2ssjr0hzstytzmt2u --amount=1000000
+```
+
+After whitelisting, you can send an onchain transaction to the address by
+executing the below on the watch-only node:
+
+```shell
+watch-only> $ lncli sendcoins --addr=bcrt1qgw53pncdudec2g74gtnzr2ssjr0hzstytzmt2u --amt=1000000
+```
+
+In order to list already whitelisted addresses, run the following command on the
+signer:
+```shell
+signer> $ lncli remotesigner addresswhitelist list
+```
+
+To remove an address from the whitelist, run the following command:
+```shell
+signer> $ lncli remotesigner addresswhitelist remove --address=bcrt1qgw53pncdudec2g74gtnzr2ssjr0hzstytzmt2u
+```
+
+#### Payment hash whitelist
+Run the following command on the remote signer to whitelist a payment hash:
+```shell
+signer> $ lncli remotesigner paymenthashwhitelist add --paymenthash=f787b3d4c8055d6aee99b812cd3faf75c5bdbcfb5b23cbd4f31a9fddd818761b --amount=100000000
+```
+
+After whitelisting, you can send a lightning payment including the payment hash
+by executing the below on the watch-only node:
+
+```shell
+watch-only> $ lncli sendpayment --pay_req=lnbcrt1m1pn7anlxpp577rm84xgq4wk4m5ehqfv60a0whzmm08mtv3uh48nr20amkqcwcdsdqqcqzzsxqyz5vqsp5l7vm32mlhvv7fcf70g9ha0styqnq0x3mwdr2l0nsmv5zr0v20wgq9qxpqysgqw9gz9tx36j4n2g372ftulvxxh7pql9c4mqp7lvwcws8sht93glxq7t9s09366725wd3mfmxe66y7jzn6xggwdqre4e9rruuu7z0f90gqjl9vfa
+```
+
+In order to list already whitelisted payment hashes, run the following command
+on the signer:
+```shell
+signer> $ lncli remotesigner paymenthashwhitelist list
+```
+
+To remove a payment hash  from the whitelist, run the following command:
+```shell
+signer> $ lncli remotesigner paymenthashwhitelist remove --paymenthash=f787b3d4c8055d6aee99b812cd3faf75c5bdbcfb5b23cbd4f31a9fddd818761b
+```
+
+### Migrating an existing setup or blind signer to half validation
+**Note:** The `half` validation mode currently only supports activation on nodes
+**without existing channels**. Future updates may allow enabling it on nodes
+with existing channels, but that is not yet supported.
+
+## Migrating an existing setup to blind remote signing
 
 It is possible to migrate a node that is currently a standalone, normal node
 with all private keys in its wallet to a setup that uses remote signing (with

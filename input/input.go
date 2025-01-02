@@ -473,6 +473,25 @@ func MakeHtlcSecondLevelTimeoutAnchorInput(signedTx *wire.MsgTx,
 		desc.InputIndex = txinIdx
 		desc.PrevOutputFetcher = prevOutputFetcher
 
+		if len(txn.TxIn) == 2 && len(txn.TxOut) == 2 {
+			// When sweeping the second level transaction, and have
+			// added an input and output, we need to add additional
+			// sign info to the sign descriptor, to account for that
+			// sweeper input & output.
+			if len(desc.OutSignInfo) != 1 {
+				return nil, fmt.Errorf(
+					"unexpected number of sign infos")
+			}
+
+			descSignInfo := make([]SignInfo, 1)
+			copy(descSignInfo, desc.OutSignInfo)
+
+			desc.OutSignInfo = append(
+				descSignInfo,
+				UnknownOptions(DefaultOutput()),
+			)
+		}
+
 		return SenderHtlcSpendTimeout(
 			signDetails.PeerSig, signDetails.SigHashType, signer,
 			&desc, txn,
@@ -517,6 +536,25 @@ func MakeHtlcSecondLevelTimeoutTaprootInput(signedTx *wire.MsgTx,
 
 		desc.SignMethod = TaprootScriptSpendSignMethod
 
+		if len(txn.TxIn) == 2 && len(txn.TxOut) == 2 {
+			// When sweeping the second level transaction, and have
+			// added an input and output, we need to add additional
+			// sign info to the sign descriptor, to account for that
+			// sweeper input & output.
+			if len(desc.OutSignInfo) != 1 {
+				return nil, fmt.Errorf(
+					"unexpected number of sign infos")
+			}
+
+			descSignInfo := make([]SignInfo, 1)
+			copy(descSignInfo, desc.OutSignInfo)
+
+			desc.OutSignInfo = append(
+				descSignInfo,
+				UnknownOptions(DefaultOutput()),
+			)
+		}
+
 		return SenderHTLCScriptTaprootTimeout(
 			signDetails.PeerSig, signDetails.SigHashType, signer,
 			&desc, txn, nil, nil,
@@ -555,6 +593,25 @@ func MakeHtlcSecondLevelSuccessAnchorInput(signedTx *wire.MsgTx,
 		desc.SigHashes = hashCache
 		desc.InputIndex = txinIdx
 		desc.PrevOutputFetcher = prevOutputFetcher
+
+		if len(txn.TxIn) == 2 && len(txn.TxOut) == 2 {
+			// When sweeping the second level transaction, and have
+			// added an input and output, we need to add additional
+			// sign info to the sign descriptor, to account for that
+			// sweeper input & output.
+			if len(desc.OutSignInfo) != 1 {
+				return nil, fmt.Errorf(
+					"unexpected number of sign infos")
+			}
+
+			descSignInfo := make([]SignInfo, 1)
+			copy(descSignInfo, desc.OutSignInfo)
+
+			desc.OutSignInfo = append(
+				descSignInfo,
+				UnknownOptions(DefaultOutput()),
+			)
+		}
 
 		return ReceiverHtlcSpendRedeem(
 			signDetails.PeerSig, signDetails.SigHashType,
@@ -598,6 +655,25 @@ func MakeHtlcSecondLevelSuccessTaprootInput(signedTx *wire.MsgTx,
 		desc.PrevOutputFetcher = prevOutputFetcher
 
 		desc.SignMethod = TaprootScriptSpendSignMethod
+
+		if len(txn.TxIn) == 2 && len(txn.TxOut) == 2 {
+			// When sweeping the second level transaction, and have
+			// added an input and output, we need to add additional
+			// sign info to the sign descriptor, to account for that
+			// sweeper input & output.
+			if len(desc.OutSignInfo) != 1 {
+				return nil, fmt.Errorf(
+					"unexpected number of sign infos")
+			}
+
+			descSignInfo := make([]SignInfo, 1)
+			copy(descSignInfo, desc.OutSignInfo)
+
+			desc.OutSignInfo = append(
+				descSignInfo,
+				UnknownOptions(DefaultOutput()),
+			)
+		}
 
 		return ReceiverHTLCScriptTaprootRedeem(
 			signDetails.PeerSig, signDetails.SigHashType,

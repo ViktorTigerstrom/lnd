@@ -520,6 +520,10 @@ type Config struct {
 	// enabled, the node acts as a remote signer in a remote signer setup.
 	WatchOnlyNode *lncfg.WatchOnlyNode `group:"watchonlynode" namespace:"watchonlynode"`
 
+	// Validation defines the level of remote signing validation this
+	// node enforces, when the node is acting as a remote signer.
+	Validation *lncfg.Validation `group:"validation" namespace:"validation"`
+
 	Sweeper *lncfg.Sweeper `group:"sweeper" namespace:"sweeper"`
 
 	Htlcswitch *lncfg.Htlcswitch `group:"htlcswitch" namespace:"htlcswitch"`
@@ -779,6 +783,7 @@ func DefaultConfig() Config {
 		KeepFailedPaymentAttempts: defaultKeepFailedPaymentAttempts,
 		RemoteSigner:              lncfg.DefaultRemoteSignerCfg(),
 		WatchOnlyNode:             lncfg.DefaultWatchOnlyNodeCfg(),
+		Validation:                lncfg.DefaultValidationCfg(),
 		Sweeper:                   lncfg.DefaultSweeperConfig(),
 		Htlcswitch: &lncfg.Htlcswitch{
 			MailboxDeliveryTimeout: htlcswitch.DefaultMailboxDeliveryTimeout,

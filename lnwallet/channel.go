@@ -515,7 +515,7 @@ func (lc *LightningChannel) diskHtlcToPayDesc(feeRate chainfee.SatPerKWeight,
 	)
 	localCommitKeys := commitKeys.GetForParty(lntypes.Local)
 	if !isDustLocal && localCommitKeys != nil {
-		scriptInfo, err := genHtlcScript(
+		scriptInfo, err := GenHtlcScript(
 			chanType, htlc.Incoming, lntypes.Local,
 			htlc.RefundTimeout, htlc.RHash, localCommitKeys,
 			auxLeaf,
@@ -532,7 +532,7 @@ func (lc *LightningChannel) diskHtlcToPayDesc(feeRate chainfee.SatPerKWeight,
 	)
 	remoteCommitKeys := commitKeys.GetForParty(lntypes.Remote)
 	if !isDustRemote && remoteCommitKeys != nil {
-		scriptInfo, err := genHtlcScript(
+		scriptInfo, err := GenHtlcScript(
 			chanType, htlc.Incoming, lntypes.Remote,
 			htlc.RefundTimeout, htlc.RHash, remoteCommitKeys,
 			auxLeaf,
@@ -779,6 +779,11 @@ type LightningChannel struct {
 	// way contracts are resolved.
 	auxResolver fn.Option[AuxContractResolver]
 
+	// RemoteSignerInformer is an optional component that can be used to
+	// inform the remote signer about the channel state for informational
+	// purposes only.
+	RemoteSignerInformer fn.Option[RemoteSignerInformer]
+
 	// Capacity is the total capacity of this channel.
 	Capacity btcutil.Amount
 
@@ -842,8 +847,17 @@ type channelOpts struct {
 	leafStore   fn.Option[AuxLeafStore]
 	auxSigner   fn.Option[AuxSigner]
 	auxResolver fn.Option[AuxContractResolver]
+	rsInformer  fn.Option[RemoteSignerInformer]
 
 	skipNonceInit bool
+}
+
+// WithRemoteSignerInformer is used to bind an existing verification/local nonce to
+// a new channel.
+func WithRemoteSignerInformer(rsInformer RemoteSignerInformer) ChannelOpt {
+	return func(o *channelOpts) {
+		o.rsInformer = fn.Some[RemoteSignerInformer](rsInformer)
+	}
 }
 
 // WithLocalMusigNonces is used to bind an existing verification/local nonce to
@@ -945,14 +959,15 @@ func NewLightningChannel(signer input.Signer,
 	}
 
 	lc := &LightningChannel{
-		Signer:        signer,
-		leafStore:     opts.leafStore,
-		auxSigner:     opts.auxSigner,
-		auxResolver:   opts.auxResolver,
-		sigPool:       sigPool,
-		currentHeight: localCommit.CommitHeight,
-		commitChains:  commitChains,
-		channelState:  state,
+		Signer:               signer,
+		leafStore:            opts.leafStore,
+		auxSigner:            opts.auxSigner,
+		auxResolver:          opts.auxResolver,
+		RemoteSignerInformer: opts.rsInformer,
+		sigPool:              sigPool,
+		currentHeight:        localCommit.CommitHeight,
+		commitChains:         commitChains,
+		channelState:         state,
 		commitBuilder: NewCommitmentBuilder(
 			state, opts.leafStore,
 		),
@@ -1118,7 +1133,7 @@ func (lc *LightningChannel) logUpdateToPayDesc(logUpdate *channeldb.LogUpdate,
 				},
 			)(auxLeaves)
 
-			scriptInfo, err := genHtlcScript(
+			scriptInfo, err := GenHtlcScript(
 				lc.channelState.ChanType, false, lntypes.Remote,
 				wireMsg.Expiry, wireMsg.PaymentHash,
 				remoteCommitKeys, auxLeaf,
@@ -2363,7 +2378,8 @@ func createHtlcRetribution(chanState *channeldb.OpenChannel,
 	secondLevelScript, err := SecondLevelHtlcScript(
 		chanState.ChanType, isRemoteInitiator,
 		keyRing.RevocationKey, keyRing.ToLocalKey, keyRing.CommitPoint,
-		theirDelay, leaseExpiry, fn.FlattenOption(secondLevelAuxLeaf),
+		theirDelay, leaseExpiry, chanState.FundingOutpoint,
+		fn.FlattenOption(secondLevelAuxLeaf),
 	)
 	if err != nil {
 		return emptyRetribution, err
@@ -2388,7 +2404,7 @@ func createHtlcRetribution(chanState *channeldb.OpenChannel,
 			})(htlc.HtlcIndex.ValOpt())
 		},
 	)(auxLeaves)
-	scriptInfo, err := genHtlcScript(
+	scriptInfo, err := GenHtlcScript(
 		chanState.ChanType, htlc.Incoming.Val, lntypes.Remote,
 		htlc.RefundTimeout.Val, htlc.RHash.Val, keyRing,
 		fn.FlattenOption(htlcLeaf),
@@ -2403,6 +2419,9 @@ func createHtlcRetribution(chanState *channeldb.OpenChannel,
 		DoubleTweak:   commitmentSecret,
 		WitnessScript: scriptInfo.WitnessScriptToSign(),
 		OutSignInfo:   []input.SignInfo{scriptInfo.SignInfo()},
+		TransactionType: input.UnknownOptions(
+			input.RemoteCommitmentTransaction(),
+		),
 		Output: &wire.TxOut{
 			PkScript: scriptInfo.PkScript(),
 			Value:    int64(htlc.Amt.Val.Int()),
@@ -3226,7 +3245,7 @@ func genRemoteHtlcSigJobs(keyRing *CommitmentKeyRing,
 			chanType, isRemoteInitiator, op, outputAmt,
 			htlc.Timeout, uint32(remoteChanCfg.CsvDelay),
 			leaseExpiry, keyRing.RevocationKey, keyRing.ToLocalKey,
-			keyRing.CommitPoint, auxLeaf,
+			keyRing.CommitPoint, chanState.FundingOutpoint, auxLeaf,
 		)
 		if err != nil {
 			return nil, nil, nil, err
@@ -3252,7 +3271,10 @@ func genRemoteHtlcSigJobs(keyRing *CommitmentKeyRing,
 			PrevOutputFetcher: prevFetcher,
 			HashType:          sigHashType,
 			SigHashes:         hashCache,
-			InputIndex:        0,
+			TransactionType: input.UnknownOptions(
+				input.SecondLevelHTLCTransaction(lntypes.Remote),
+			),
+			InputIndex: 0,
 		}
 		sigJob.OutputIndex = htlc.remoteOutputIndex
 
@@ -3310,7 +3332,7 @@ func genRemoteHtlcSigJobs(keyRing *CommitmentKeyRing,
 			chanType, isRemoteInitiator, op, outputAmt,
 			uint32(remoteChanCfg.CsvDelay), leaseExpiry,
 			keyRing.RevocationKey, keyRing.ToLocalKey,
-			keyRing.CommitPoint, auxLeaf,
+			keyRing.CommitPoint, chanState.FundingOutpoint, auxLeaf,
 		)
 		if err != nil {
 			return nil, nil, nil, err
@@ -3337,6 +3359,9 @@ func genRemoteHtlcSigJobs(keyRing *CommitmentKeyRing,
 			HashType:          sigHashType,
 			SigHashes:         hashCache,
 			InputIndex:        0,
+			TransactionType: input.UnknownOptions(
+				input.SecondLevelHTLCTransaction(lntypes.Remote),
+			),
 		}
 		sigJob.OutputIndex = htlc.remoteOutputIndex
 
@@ -4040,13 +4065,6 @@ func (lc *LightningChannel) SignNextCommitment(
 
 	lc.sigPool.SubmitSignBatch(sigBatch)
 
-	// Ensure that we're passing the correct derivation info to the signer.
-	// Since the SignDescriptor is created when the channel object is
-	// initialized, and reused with every update, we clean up after
-	// ourselves when we're finished signing.
-	lc.signDesc.OutSignInfo = newCommitView.signInfo
-	defer func() { lc.signDesc.OutSignInfo = []input.SignInfo{} }()
-
 	err = fn.MapOptionZ(lc.auxSigner, func(a AuxSigner) error {
 		return a.SubmitSecondLevelSigBatch(
 			NewAuxChanState(lc.channelState), newCommitView.txn,
@@ -4061,7 +4079,21 @@ func (lc *LightningChannel) SignNextCommitment(
 	// While the jobs are being carried out, we'll Sign their version of
 	// the new commitment transaction while we're waiting for the rest of
 	// the HTLC signatures to be processed.
-	//
+
+	// Ensure that we're passing the correct derivation info to the signer.
+	// Since the SignDescriptor is created when the channel object is
+	// initialized, and reused with every update, we clean up after
+	// ourselves when we're finished signing.
+	lc.signDesc.OutSignInfo = newCommitView.signInfo
+	defer func() { lc.signDesc.OutSignInfo = []input.SignInfo{} }()
+
+	// TODO: IS THIS ACTUALLY SECOND LEVEL TX?
+	// OR IS HTLC SIGS ACTUALLY GENERATED ON THE WATCH-ONLY???
+	lc.signDesc.TransactionType = input.UnknownOptions(
+		input.RemoteCommitmentTransaction(),
+	)
+	defer func() { lc.signDesc.TransactionType = nil }()
+
 	// TODO(roasbeef): abstract into CommitSigner interface?
 	if lc.channelState.ChanType.IsTaproot() {
 		// In this case, we'll send out a partial signature as this is
@@ -4069,7 +4101,7 @@ func (lc *LightningChannel) SignNextCommitment(
 		// just blank.
 		remoteSession := lc.musigSessions.RemoteSession
 		musig, err := remoteSession.SignCommit(
-			newCommitView.txn,
+			newCommitView.txn, lc.signDesc,
 		)
 		if err != nil {
 			close(cancelChan)
@@ -4191,7 +4223,7 @@ func (lc *LightningChannel) resignMusigCommit(
 	commitTx *wire.MsgTx) (lnwire.OptPartialSigWithNonceTLV, error) {
 
 	remoteSession := lc.musigSessions.RemoteSession
-	musig, err := remoteSession.SignCommit(commitTx)
+	musig, err := remoteSession.SignCommit(commitTx, lc.signDesc)
 	if err != nil {
 		var none lnwire.OptPartialSigWithNonceTLV
 		return none, err
@@ -4845,6 +4877,7 @@ func genHtlcSigValidationJobs(chanState *channeldb.OpenChannel,
 					outputAmt, uint32(localChanCfg.CsvDelay),
 					leaseExpiry, keyRing.RevocationKey,
 					keyRing.ToLocalKey, keyRing.CommitPoint,
+					chanState.FundingOutpoint,
 					auxLeaf,
 				)
 				if err != nil {
@@ -4940,6 +4973,7 @@ func genHtlcSigValidationJobs(chanState *channeldb.OpenChannel,
 					uint32(localChanCfg.CsvDelay),
 					leaseExpiry, keyRing.RevocationKey,
 					keyRing.ToLocalKey, keyRing.CommitPoint,
+					chanState.FundingOutpoint,
 					auxLeaf,
 				)
 				if err != nil {
@@ -5413,6 +5447,29 @@ func (lc *LightningChannel) ReceiveNewCommitment(commitSigs *CommitSigs) error {
 	}
 
 	lc.commitChains.Local.addCommitment(localCommitmentView)
+
+	// If we're using a remote signer that needs information about the
+	// current local commitment transaction, we also forward the local
+	// commitment transaction to the remote signer.
+	lc.RemoteSignerInformer.WhenSome(func(rsInformer RemoteSignerInformer) {
+		// Ensure that we're passing the correct derivation info to the
+		// signer. Since the SignDescriptor is created when the channel
+		// object is initialized, and reused with every update, we clean
+		// up after ourselves when we're finished signing.
+		lc.signDesc.OutSignInfo = localCommitmentView.signInfo
+		defer func() { lc.signDesc.OutSignInfo = []input.SignInfo{} }()
+
+		lc.signDesc.TransactionType = input.UnknownOptions(
+			input.LocalCommitmentTransaction(),
+		)
+
+		err = rsInformer.ForwardLocalCommitment(
+			context.TODO(), localCommitmentView.txn, lc.signDesc,
+		)
+	})
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -6528,8 +6585,8 @@ type TaprootSignedCommitTxInputs struct {
 // exported to give outside tooling the possibility to recreate the witness.
 // A key use case is generating the witness data for a commitment transaction
 // from a Static Channel Backup (SCB).
-func GetSignedCommitTx(inputs SignedCommitTxInputs,
-	signer input.Signer) (*wire.MsgTx, error) {
+func GetSignedCommitTx(inputs SignedCommitTxInputs, signer input.Signer,
+	rsInformer fn.Option[RemoteSignerInformer]) (*wire.MsgTx, error) {
 
 	commitTx := inputs.CommitTx.Copy()
 
@@ -6564,7 +6621,7 @@ func GetSignedCommitTx(inputs SignedCommitTxInputs,
 		musigSession := NewPartialMusigSession(
 			*localNonce, inputs.OurKey, inputs.TheirKey, signer,
 			inputs.SignDesc.Output, LocalMusigCommit,
-			tapscriptTweak,
+			tapscriptTweak, rsInformer,
 		)
 
 		var remoteSig lnwire.PartialSigWithNonce
@@ -6590,7 +6647,8 @@ func GetSignedCommitTx(inputs SignedCommitTxInputs,
 		// Now that the session has been finalized, we can generate our
 		// half of the signature for the state. We don't capture the
 		// sig as it's stored within the session.
-		if _, err := musigSession.SignCommit(commitTx); err != nil {
+		_, err = musigSession.SignCommit(commitTx, inputs.SignDesc)
+		if err != nil {
 			return nil, fmt.Errorf("unable to sign musig2 "+
 				"commitment: %w", err)
 		}
@@ -6665,43 +6723,48 @@ func (lc *LightningChannel) getSignedCommitTx() (*wire.MsgTx, error) {
 		})
 	}
 
-	if !lc.channelState.ChanType.IsTaproot() {
-		// Populate the derivation info of our SignDescriptor so that we
-		// can pass it on to the signer.
-		localACKedIndex := lc.commitChains.Remote.tail().messageIndices.Local
-		localHtlcIndex := lc.commitChains.Remote.tail().ourHtlcIndex
+	// Populate the derivation info of our SignDescriptor so that we
+	// can pass it on to the signer.
+	localACKedIndex := lc.commitChains.Remote.tail().messageIndices.Local
+	localHtlcIndex := lc.commitChains.Remote.tail().ourHtlcIndex
 
-		commitSecret, err := lc.channelState.RevocationProducer.AtIndex(
-			lc.currentHeight,
-		)
-		if err != nil {
-			return nil, err
-		}
-		commitPoint := input.ComputeCommitmentPoint(commitSecret[:])
-		keyRing := DeriveCommitmentKeys(
-			commitPoint, lntypes.Local, lc.channelState.ChanType,
-			&lc.channelState.LocalChanCfg,
-			&lc.channelState.RemoteChanCfg,
-		)
+	commitSecret, err := lc.channelState.RevocationProducer.AtIndex(
+		lc.currentHeight,
+	)
+	if err != nil {
+		return nil, err
+	}
+	
+	commitPoint := input.ComputeCommitmentPoint(commitSecret[:])
+	keyRing := DeriveCommitmentKeys(
+		commitPoint, lntypes.Local, lc.channelState.ChanType,
+		&lc.channelState.LocalChanCfg,
+		&lc.channelState.RemoteChanCfg,
+	)
 
-		localCommitmentView, err := lc.fetchCommitmentView(
-			lntypes.Local, localACKedIndex, localHtlcIndex,
-			lc.updateLogs.Remote.logIndex,
-			lc.updateLogs.Remote.htlcCounter, keyRing,
-		)
-		if err != nil {
-			return nil, err
-		}
-
-		// Ensure that we're passing the correct derivation info to the
-		// signer. Since the SignDescriptor is created when the channel
-		// object is initialized, and reused with every update, we clean
-		// up after ourselves when we're finished signing.
-		lc.signDesc.OutSignInfo = localCommitmentView.signInfo
-		defer func() { lc.signDesc.OutSignInfo = []input.SignInfo{} }()
+	localCommitmentView, err := lc.fetchCommitmentView(
+		lntypes.Local, localACKedIndex, localHtlcIndex,
+		lc.updateLogs.Remote.logIndex,
+		lc.updateLogs.Remote.htlcCounter, keyRing,
+	)
+	if err != nil {
+		return nil, err
 	}
 
-	return GetSignedCommitTx(inputs, lc.Signer)
+	// Ensure that we're passing the correct derivation info to the
+	// signer. Since the SignDescriptor is created when the channel
+	// object is initialized, and reused with every update, we clean
+	// up after ourselves when we're finished signing.
+	lc.signDesc.OutSignInfo = localCommitmentView.signInfo
+	defer func() { lc.signDesc.OutSignInfo = []input.SignInfo{} }()
+
+	lc.signDesc.TransactionType = input.UnknownOptions(
+		input.LocalCommitmentTransaction(),
+	)
+
+	defer func() { lc.signDesc.TransactionType = nil }()
+
+	return GetSignedCommitTx(inputs, lc.Signer, lc.RemoteSignerInformer)
 }
 
 // CommitOutputResolution carries the necessary information required to allow
@@ -7130,7 +7193,7 @@ func newOutgoingHtlcResolution(signer input.Signer,
 	auxLeaf := fn.FlatMapOption(func(l CommitAuxLeaves) input.AuxTapLeaf {
 		return l.OutgoingHtlcLeaves[htlc.HtlcIndex].AuxTapLeaf
 	})(auxLeaves)
-	htlcScriptInfo, err := genHtlcScript(
+	htlcScriptInfo, err := GenHtlcScript(
 		chanType, false, whoseCommit, htlc.RefundTimeout, htlc.RHash,
 		keyRing, auxLeaf,
 	)
@@ -7252,7 +7315,7 @@ func newOutgoingHtlcResolution(signer input.Signer,
 		chanType, isCommitFromInitiator, op, secondLevelOutputAmt,
 		htlc.RefundTimeout, csvDelay, leaseExpiry,
 		keyRing.RevocationKey, keyRing.ToLocalKey, keyRing.CommitPoint,
-		secondLevelAuxLeaf,
+		chanState.FundingOutpoint, secondLevelAuxLeaf,
 	)
 	if err != nil {
 		return nil, err
@@ -7276,6 +7339,9 @@ func newOutgoingHtlcResolution(signer input.Signer,
 		PrevOutputFetcher: prevFetcher,
 		SigHashes:         hashCache,
 		InputIndex:        0,
+		TransactionType: input.UnknownOptions(
+			input.SecondLevelHTLCTransaction(whoseCommit),
+		),
 	}
 
 	htlcSig, err := input.ParseSignature(htlc.Signature)
@@ -7336,7 +7402,8 @@ func newOutgoingHtlcResolution(signer input.Signer,
 		htlcSweepScript, err = SecondLevelHtlcScript(
 			chanType, isCommitFromInitiator, keyRing.RevocationKey,
 			keyRing.ToLocalKey, keyRing.CommitPoint, csvDelay,
-			leaseExpiry, secondLevelAuxLeaf,
+			leaseExpiry, chanState.FundingOutpoint,
+			secondLevelAuxLeaf,
 		)
 		if err != nil {
 			return nil, err
@@ -7485,7 +7552,7 @@ func newIncomingHtlcResolution(signer input.Signer,
 	auxLeaf := fn.FlatMapOption(func(l CommitAuxLeaves) input.AuxTapLeaf {
 		return l.IncomingHtlcLeaves[htlc.HtlcIndex].AuxTapLeaf
 	})(auxLeaves)
-	scriptInfo, err := genHtlcScript(
+	scriptInfo, err := GenHtlcScript(
 		chanType, true, whoseCommit, htlc.RefundTimeout, htlc.RHash,
 		keyRing, auxLeaf,
 	)
@@ -7602,7 +7669,8 @@ func newIncomingHtlcResolution(signer input.Signer,
 	successTx, successSignInfo, err := CreateHtlcSuccessTx(
 		chanType, isCommitFromInitiator, op, secondLevelOutputAmt,
 		csvDelay, leaseExpiry, keyRing.RevocationKey,
-		keyRing.ToLocalKey, keyRing.CommitPoint, secondLevelAuxLeaf,
+		keyRing.ToLocalKey, keyRing.CommitPoint,
+		chanState.FundingOutpoint, secondLevelAuxLeaf,
 	)
 	if err != nil {
 		return nil, err
@@ -7625,6 +7693,9 @@ func newIncomingHtlcResolution(signer input.Signer,
 		PrevOutputFetcher: prevFetcher,
 		SigHashes:         hashCache,
 		InputIndex:        0,
+		TransactionType: input.UnknownOptions(
+			input.SecondLevelHTLCTransaction(whoseCommit),
+		),
 	}
 
 	htlcSig, err := input.ParseSignature(htlc.Signature)
@@ -7686,7 +7757,8 @@ func newIncomingHtlcResolution(signer input.Signer,
 		htlcSweepScript, err = SecondLevelHtlcScript(
 			chanType, isCommitFromInitiator, keyRing.RevocationKey,
 			keyRing.ToLocalKey, keyRing.CommitPoint, csvDelay,
-			leaseExpiry, secondLevelAuxLeaf,
+			leaseExpiry, chanState.FundingOutpoint,
+			secondLevelAuxLeaf,
 		)
 		if err != nil {
 			return nil, err
@@ -8430,30 +8502,36 @@ func (lc *LightningChannel) CreateCloseProposal(proposedFee btcutil.Amount,
 		return nil, nil, 0, err
 	}
 
+	// Ensure that we're passing the correct derivation info to the signer.
+	// Since the SignDescriptor is created when the channel object is
+	// initialized, and reused with every update, we clean up after
+	// ourselves when we're finished signing.
+	lc.signDesc.OutSignInfo = make(
+		[]input.SignInfo, len(closeTx.TxOut),
+	)
+	defer func() { lc.signDesc.OutSignInfo = []input.SignInfo{} }()
+
+	lc.signDesc.TransactionType = input.UnknownOptions(
+		input.CooperativeCloseTransaction(),
+	)
+	defer func() { lc.signDesc.TransactionType = nil }()
+
 	// If we have a co-op close musig session, then this is a taproot
 	// channel, so we'll generate a _partial_ signature.
 	var sig input.Signature
 	if opts.musigSession != nil {
-		sig, err = opts.musigSession.SignCommit(closeTx)
+		sig, err = opts.musigSession.SignCommit(closeTx, lc.signDesc)
 		if err != nil {
 			return nil, nil, 0, err
 		}
 	} else {
-		// For regular channels, ensure that we're passing the correct
-		// derivation info to the signer. Since the SignDescriptor is
-		// created when the channel object is initialized, and reused
-		// with every update, we clean up after ourselves when we're
-		// finished signing.
-		lc.signDesc.OutSignInfo = make(
-			[]input.SignInfo, len(closeTx.TxOut),
-		)
-		defer func() { lc.signDesc.OutSignInfo = []input.SignInfo{} }()
 
 		// Finally, sign the completed cooperative closure transaction.
 		// As the initiator we'll simply send our signature over to the
 		// remote party, using the generated txid to be notified once
 		// the closure transaction has been confirmed.
 		lc.signDesc.SigHashes = input.NewTxSigHashesV0Only(closeTx)
+
 		sig, err = lc.Signer.SignOutputRaw(closeTx, lc.signDesc)
 		if err != nil {
 			return nil, nil, 0, err
@@ -9925,13 +10003,14 @@ func (lc *LightningChannel) InitRemoteMusigNonces(remoteNonce *musig2.Nonces,
 	// TODO(roasbeef): propagate rename of signing and verification nonces
 
 	sessionCfg := &MusigSessionCfg{
-		LocalKey:       localChanCfg.MultiSigKey,
-		RemoteKey:      remoteChanCfg.MultiSigKey,
-		LocalNonce:     *localNonce,
-		RemoteNonce:    *remoteNonce,
-		Signer:         lc.Signer,
-		InputTxOut:     &lc.fundingOutput,
-		TapscriptTweak: lc.channelState.TapscriptRoot,
+		LocalKey:             localChanCfg.MultiSigKey,
+		RemoteKey:            remoteChanCfg.MultiSigKey,
+		LocalNonce:           *localNonce,
+		RemoteNonce:          *remoteNonce,
+		Signer:               lc.Signer,
+		InputTxOut:           &lc.fundingOutput,
+		TapscriptTweak:       lc.channelState.TapscriptRoot,
+		RemoteSignerInformer: lc.RemoteSignerInformer,
 	}
 	lc.musigSessions = NewMusigPairSession(
 		sessionCfg,

@@ -1025,6 +1025,39 @@
       "description": "- `p2wkh`: Pay to witness key hash (`WITNESS_PUBKEY_HASH` = 0)\n- `np2wkh`: Pay to nested witness key hash (`NESTED_PUBKEY_HASH` = 1)\n- `p2tr`: Pay to taproot pubkey (`TAPROOT_PUBKEY` = 4)",
       "title": "`AddressType` has to be one of:"
     },
+    "lnrpcChannelConfig": {
+      "type": "object",
+      "properties": {
+        "channel_state_bounds": {
+          "$ref": "#/definitions/lnrpcChannelStateBounds",
+          "description": "The channel state bounds."
+        },
+        "commitment_params": {
+          "$ref": "#/definitions/lnrpcCommitmentParams",
+          "description": "The commitment params for the channel."
+        },
+        "multi_sig_key": {
+          "$ref": "#/definitions/lnrpcKeyDescriptor",
+          "description": "MultiSigKey is the key to be used within the 2-of-2 output script\nfor the owner of this channel config."
+        },
+        "revocation_base_point": {
+          "$ref": "#/definitions/lnrpcKeyDescriptor",
+          "description": "RevocationBasePoint is the base public key to be used when deriving\nrevocation keys for the remote node's commitment transaction. This\nwill be combined along with a per commitment secret to derive a\nunique revocation key for each state."
+        },
+        "payment_base_point": {
+          "$ref": "#/definitions/lnrpcKeyDescriptor",
+          "description": "PaymentBasePoint is the base public key to be used when deriving\nthe key used within the non-delayed pay-to-self output on the\ncommitment transaction for a node. This will be combined with a\ntweak derived from the per-commitment point to ensure unique keys\nfor each commitment transaction."
+        },
+        "delay_base_point": {
+          "$ref": "#/definitions/lnrpcKeyDescriptor",
+          "description": "DelayBasePoint is the base public key to be used when deriving the\nkey used within the delayed pay-to-self output on the commitment\ntransaction for a node. This will be combined with a tweak derived\nfrom the per-commitment point to ensure unique keys for each\ncommitment transaction."
+        },
+        "htlc_base_point": {
+          "$ref": "#/definitions/lnrpcKeyDescriptor",
+          "description": "HtlcBasePoint is the base public key to be used when deriving the\nlocal HTLC key. The derived key (combined with the tweak derived\nfrom the per-commitment point) is used within the \"to self\" clause\nwithin any HTLC output scripts."
+        }
+      }
+    },
     "lnrpcChannelPoint": {
       "type": "object",
       "properties": {
@@ -1044,6 +1077,31 @@
         }
       }
     },
+    "lnrpcChannelStateBounds": {
+      "type": "object",
+      "properties": {
+        "chan_reserve_sat": {
+          "type": "string",
+          "format": "uint64",
+          "description": "The minimum satoshis this node is required to reserve in its balance."
+        },
+        "max_pending_amt_msat": {
+          "type": "string",
+          "format": "uint64",
+          "description": "The maximum amount of coins in millisatoshis that can be pending in this\nchannel."
+        },
+        "min_htlc": {
+          "type": "string",
+          "format": "uint64",
+          "description": "The smallest HTLC in millisatoshis that this node will accept."
+        },
+        "max_accepted_htlcs": {
+          "type": "integer",
+          "format": "int64",
+          "description": "The total number of incoming HTLC's that this node will accept."
+        }
+      }
+    },
     "lnrpcCoinSelectionStrategy": {
       "type": "string",
       "enum": [
@@ -1053,6 +1111,50 @@
       ],
       "default": "STRATEGY_USE_GLOBAL_CONFIG",
       "description": " - STRATEGY_USE_GLOBAL_CONFIG: Use the coin selection strategy defined in the global configuration\n(lnd.conf).\n - STRATEGY_LARGEST: Select the largest available coins first during coin selection.\n - STRATEGY_RANDOM: Randomly select the available coins during coin selection."
+    },
+    "lnrpcCommitmentParams": {
+      "type": "object",
+      "properties": {
+        "dust_limit": {
+          "type": "string",
+          "format": "uint64",
+          "description": "The dust limit for this node."
+        },
+        "csv_delay": {
+          "type": "integer",
+          "format": "int64",
+          "description": "The number of blocks to use for the relative time lock in the pay-to-self\noutput of the commitment transaction."
+        }
+      }
+    },
+    "lnrpcKeyDescriptor": {
+      "type": "object",
+      "properties": {
+        "raw_key_bytes": {
+          "type": "string",
+          "format": "byte",
+          "description": "The raw bytes of the key being identified."
+        },
+        "key_loc": {
+          "$ref": "#/definitions/lnrpcKeyLocator",
+          "description": "The key locator that identifies which key to use for signing."
+        }
+      }
+    },
+    "lnrpcKeyLocator": {
+      "type": "object",
+      "properties": {
+        "key_family": {
+          "type": "integer",
+          "format": "int32",
+          "description": "The family of key being identified."
+        },
+        "key_index": {
+          "type": "integer",
+          "format": "int32",
+          "description": "The precise index of the key being identified."
+        }
+      }
     },
     "lnrpcOutPoint": {
       "type": "object",
@@ -1977,6 +2079,32 @@
         }
       }
     },
+    "walletrpcFundingInfo": {
+      "type": "object",
+      "properties": {
+        "funding_outpoint": {
+          "$ref": "#/definitions/lnrpcOutPoint",
+          "description": "The funding outpoint for the channel."
+        },
+        "channel_type": {
+          "type": "string",
+          "format": "uint64",
+          "description": "The channel type of the channel."
+        },
+        "is_local_initiator": {
+          "type": "boolean",
+          "description": "Signals if the local node is the initiator of the channel."
+        },
+        "local_channel_config": {
+          "$ref": "#/definitions/lnrpcChannelConfig",
+          "description": "The local channel config of the channel."
+        },
+        "remote_channel_config": {
+          "$ref": "#/definitions/lnrpcChannelConfig",
+          "description": "The remote channel config of the channel."
+        }
+      }
+    },
     "walletrpcGetTransactionRequest": {
       "type": "object",
       "properties": {
@@ -2250,6 +2378,42 @@
         }
       }
     },
+    "walletrpcMetadataRequest": {
+      "type": "object",
+      "properties": {
+        "local_commitment_info": {
+          "$ref": "#/definitions/walletrpcSignPsbtRequest",
+          "description": "Informs the remote signer of the current local commitment transaction.\nNote: This is not a request to the remote signer to sign the local\ncommitment, it is strictly only used for informing remote signer about\nthe latest local commitment transaction."
+        },
+        "funding_info": {
+          "$ref": "#/definitions/walletrpcFundingInfo",
+          "description": "Informs the remote signer of information regarding a new channel when\nchannel has been funded and has a valid funding outpoint."
+        },
+        "accounts": {
+          "$ref": "#/definitions/walletrpcListAccountsResponse",
+          "description": "Informs the remote signer of the accounts the watch-only uses."
+        },
+        "mu_sig_2_session_info": {
+          "$ref": "#/definitions/walletrpcMuSig2Info",
+          "description": "Informs the remote signer of the accounts the watch-only uses."
+        }
+      }
+    },
+    "walletrpcMuSig2Info": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "format": "byte",
+          "description": "The unique ID of the signing session that this metadata should be used for."
+        },
+        "funded_psbt": {
+          "type": "string",
+          "format": "byte",
+          "description": "The PSBT that will be signed. The hash for the transaction included in the\nPSBT, must match the message_digest in the MuSig2SignRequest that will be\nsent to the remote signer once the transaction is requested to be signed."
+        }
+      }
+    },
     "walletrpcPendingSweep": {
       "type": "object",
       "properties": {
@@ -2372,6 +2536,10 @@
         "registration_info": {
           "type": "string",
           "description": "Contains information about the watch-only lnd that may be useful for the\nremote signer."
+        },
+        "accounts": {
+          "$ref": "#/definitions/walletrpcListAccountsResponse",
+          "description": "Accounts contains the accounts that the watch-only node uses in the\nwallet."
         }
       }
     },
@@ -2522,6 +2690,10 @@
         "sign_psbt_request": {
           "$ref": "#/definitions/walletrpcSignPsbtRequest",
           "description": "Requests that the remote signer signs the passed PSBT."
+        },
+        "metadata_request": {
+          "$ref": "#/definitions/walletrpcMetadataRequest",
+          "description": "Forwards metadata to the remote signer."
         }
       }
     },
@@ -2576,6 +2748,10 @@
         "signer_error": {
           "$ref": "#/definitions/walletrpcSignerError",
           "description": "If the remote signer encounters an error while processing a request, it\nwill respond with a SignerError message that details the error."
+        },
+        "metadata_received": {
+          "type": "boolean",
+          "description": "The remote signer's corresponding response to a Local Commitment Info\nrequest, to signal that the remote signer has received the local\ncommitment info."
         }
       }
     },

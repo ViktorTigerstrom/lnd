@@ -92,6 +92,11 @@ type SignDescriptor struct {
 	// to authorize the signature in the Unknowns field.
 	OutSignInfo []SignInfo
 
+	// TransactionType is an optional field that can be used to pass
+	// information on which type of transaction is requested to be signed,
+	// a remote signer.
+	TransactionType SignInfo
+
 	// Output is the target output which should be signed. The PkScript and
 	// Value fields within the output should be properly populated,
 	// otherwise an invalid signature may be generated.
@@ -120,6 +125,14 @@ type SignDescriptor struct {
 	// InputIndex is the target input within the transaction that should be
 	// signed.
 	InputIndex int
+}
+
+func (s *SignDescriptor) AddSignInfo(newInfo SignInfo) {
+	if s.OutSignInfo == nil {
+		s.OutSignInfo = make([]SignInfo, 0)
+	}
+
+	s.OutSignInfo = append(s.OutSignInfo, newInfo)
 }
 
 // SignMethod defines the different ways a signer can sign, given a specific
@@ -237,6 +250,85 @@ func WriteSignDescriptor(w io.Writer, sd *SignDescriptor) error {
 		return err
 	}
 
+	// TODO: Add these with TLV fields. Check writeChanConfig which does
+	// use WriteElement which uses TLV fields. Check in channel.go
+	/*
+		func putChanInfo(chanBucket kvdb.RwBucket, channel *OpenChannel) error {
+			var w bytes.Buffer
+			if err := WriteElements(&w,
+				channel.ChanType, channel.ChainHash, channel.FundingOutpoint,
+				channel.ShortChannelID, channel.IsPending, channel.IsInitiator,
+				channel.chanStatus, channel.FundingBroadcastHeight,
+				channel.NumConfsRequired, channel.ChannelFlags,
+				channel.IdentityPub, channel.Capacity, channel.TotalMSatSent,
+				channel.TotalMSatReceived,
+			); err != nil {
+				return err
+			}
+
+			// For single funder channels that we initiated, and we have the
+			// funding transaction, then write the funding txn.
+			if fundingTxPresent(channel) {
+				if err := WriteElement(&w, channel.FundingTxn); err != nil {
+					return err
+				}
+			}
+
+			if err := writeChanConfig(&w, &channel.LocalChanCfg); err != nil {
+				return err
+			}
+			if err := writeChanConfig(&w, &channel.RemoteChanCfg); err != nil {
+				return err
+			}
+
+			auxData := channel.extractTlvData()
+			if err := auxData.encode(&w); err != nil {
+				return fmt.Errorf("unable to encode aux data: %w", err)
+			}
+
+			if err := chanBucket.Put(chanInfoKey, w.Bytes()); err != nil {
+				return err
+			}
+
+			// Finally, add optional shutdown scripts for the local and remote peer if
+			// they are present.
+			if err := putOptionalUpfrontShutdownScript(
+				chanBucket, localUpfrontShutdownKey, channel.LocalShutdownScript,
+			); err != nil {
+				return err
+			}
+
+			return putOptionalUpfrontShutdownScript(
+				chanBucket, remoteUpfrontShutdownKey, channel.RemoteShutdownScript,
+			)
+		}
+
+		auxData := channel.extractTlvData() is where we start using TLV instead.
+	*/
+
+	signInfos, err := SerializeSignInfos(sd.OutSignInfo)
+	if err != nil {
+		return err
+	}
+
+	if _, err := w.Write(signInfos[:]); err != nil {
+		return err
+	}
+
+	txTypeList := make([]SignInfo, 0)
+	if sd.TransactionType != nil {
+		txTypeList = append(txTypeList, sd.TransactionType)
+	}
+
+	txTypeBytes, err := SerializeSignInfos(txTypeList)
+	if err != nil {
+		return err
+	}
+
+	if _, err := w.Write(txTypeBytes[:]); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -324,12 +416,64 @@ func ReadSignDescriptor(r io.Reader, sd *SignDescriptor) error {
 	}
 	sd.HashType = txscript.SigHashType(binary.BigEndian.Uint32(hashType[:]))
 
+	// Read the sd.OutSignInfo
+	// First, read the 4-byte length prefix.
+	var outLenPrefix [4]byte
+	if _, err := io.ReadFull(r, outLenPrefix[:]); err != nil {
+		// Old sign descriptors that didn't support OutSignInfo.
+		return nil
+	}
+	totalOutLen := binary.LittleEndian.Uint32(outLenPrefix[:])
+
+	// Read the remaining payload for OutSignInfo.
+	outPayload := make([]byte, totalOutLen)
+	if _, err := io.ReadFull(r, outPayload); err != nil {
+		return err
+	}
+
+	// Prepend the length prefix to reconstruct the complete serialized blob.
+	outSerialized := append(outLenPrefix[:], outPayload...)
+	outInfos, err := ParseSignInfos(outSerialized)
+	if err != nil {
+		return err
+	}
+	sd.OutSignInfo = outInfos
+
+	// Read the sd.TransactionType
+	// Read the 4-byte length prefix.
+	var txTypeLenPrefix [4]byte
+	if _, err := io.ReadFull(r, txTypeLenPrefix[:]); err != nil {
+		return err
+	}
+	totalTxTypeLen := binary.LittleEndian.Uint32(txTypeLenPrefix[:])
+	// Read the remaining payload for TransactionType.
+	txTypePayload := make([]byte, totalTxTypeLen)
+	if _, err := io.ReadFull(r, txTypePayload); err != nil {
+		return err
+	}
+
+	// Prepend the length prefix.
+	txTypeSerialized := append(txTypeLenPrefix[:], txTypePayload...)
+	txTypeInfos, err := ParseSignInfos(txTypeSerialized)
+	if err != nil {
+		return err
+	}
+
+	// TransactionType is stored as a single SignInfo if present.
+	if len(txTypeInfos) > 0 {
+		sd.TransactionType = txTypeInfos[0]
+	} else {
+		sd.TransactionType = nil
+	}
+
 	return nil
 }
 
 // MaybeEnrichPsbt populates a PSBT packet's partial outputs with extra data
 // provided in a sign descriptor, if any.
-func MaybeEnrichPsbt(packet *psbt.Packet, outSignInfo []SignInfo) error {
+func MaybeEnrichPsbt(packet *psbt.Packet, outSignInfo []SignInfo,
+	transactionType SignInfo) error {
+
 	if len(outSignInfo) == 0 {
 		return nil
 	}
@@ -345,6 +489,8 @@ func MaybeEnrichPsbt(packet *psbt.Packet, outSignInfo []SignInfo) error {
 			outSignInfo[i]...,
 		)
 	}
+
+	packet.Unknowns = append(packet.Unknowns, transactionType...)
 
 	return nil
 }

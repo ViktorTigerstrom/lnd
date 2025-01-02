@@ -2,6 +2,8 @@ package lnd
 
 import (
 	"fmt"
+	"github.com/lightningnetwork/lnd/lnrpc/remotesignerrpc"
+	"github.com/lightningnetwork/lnd/lnwallet/validator"
 	"net"
 	"reflect"
 
@@ -96,6 +98,11 @@ type subRPCServerConfigs struct {
 	// developers manipulate LND state that is normally not possible.
 	// Should only be used for development purposes.
 	DevRPC *devrpc.Config `group:"devrpc" namespace:"devrpc"`
+
+	// RemoteSignerRPC is a sub-RPC server that exposes functionality
+	// allowing a user to whitelist addresses and payment hashes for remote
+	// signing validation.
+	RemoteSignerRPC *remotesignerrpc.Config `group:"remotesignerrpc" namespace:"remotesignerrpc"`
 }
 
 // PopulateDependencies attempts to iterate through all the sub-server configs
@@ -116,6 +123,7 @@ func (s *subRPCServerConfigs) PopulateDependencies(cfg *Config,
 	nodeSigner *netann.NodeSigner,
 	graphDB *graphdb.ChannelGraph,
 	chanStateDB *channeldb.ChannelStateDB,
+	remoteSignerDB validator.RemoteSignerDB,
 	sweeper *sweep.UtxoSweeper,
 	tower *watchtower.Standalone,
 	towerClientMgr *wtclient.Manager,
@@ -182,9 +190,10 @@ func (s *subRPCServerConfigs) PopulateDependencies(cfg *Config,
 			subCfgValue.FieldByName("FeeEstimator").Set(
 				reflect.ValueOf(cc.FeeEstimator),
 			)
-			subCfgValue.FieldByName("Wallet").Set(
+
+			/*subCfgValue.FieldByName("Wallet").Set(
 				reflect.ValueOf(cc.Wallet),
-			)
+			)*/
 			subCfgValue.FieldByName("CoinSelectionLocker").Set(
 				reflect.ValueOf(cc.Wallet),
 			)
@@ -197,9 +206,10 @@ func (s *subRPCServerConfigs) PopulateDependencies(cfg *Config,
 			subCfgValue.FieldByName("Chain").Set(
 				reflect.ValueOf(cc.ChainIO),
 			)
-			subCfgValue.FieldByName("ChainParams").Set(
-				reflect.ValueOf(activeNetParams),
-			)
+			/*
+				subCfgValue.FieldByName("ChainParams").Set(
+					reflect.ValueOf(activeNetParams),
+				)*/
 			subCfgValue.FieldByName("CurrentNumAnchorChans").Set(
 				reflect.ValueOf(cc.Wallet.CurrentNumAnchorChans),
 			)
@@ -212,10 +222,23 @@ func (s *subRPCServerConfigs) PopulateDependencies(cfg *Config,
 				reflect.ValueOf(chanStateDB),
 			)
 
-			// The "RemoteSignerConnection" field have already been
-			// added through the PopulateRemoteSignerCfgValues
-			// function, and we therefore don't need to overwrite
-			// them here.
+			// The "Wallet" and "RemoteSignerConnection" fields have
+			// already been added through the
+			// PopulateRemoteSignerCfgValues function, and we
+			// therefore don't need to overwrite them here.
+
+		case *remotesignerrpc.Config:
+			subCfgValue := extractReflectValue(subCfg)
+
+			subCfgValue.FieldByName("NetworkDir").Set(
+				reflect.ValueOf(networkDir),
+			)
+			subCfgValue.FieldByName("MacService").Set(
+				reflect.ValueOf(macService),
+			)
+			subCfgValue.FieldByName("RemoteSignerDB").Set(
+				reflect.ValueOf(remoteSignerDB),
+			)
 
 		case *autopilotrpc.Config:
 			subCfgValue := extractReflectValue(subCfg)
@@ -393,15 +416,23 @@ func (s *subRPCServerConfigs) PopulateDependencies(cfg *Config,
 func (s *subRPCServerConfigs) PopulateRemoteSignerConnectionCfg(cfg *Config,
 	cc *chainreg.ChainControl) error {
 
+	// Extract the WalletKit sub-server config, and populate the config with
+	// the remote signer connection.
+	subCfgValue := extractReflectValue(s.WalletKitRPC)
+
+	subCfgValue.FieldByName("Wallet").Set(
+		reflect.ValueOf(cc.Wallet),
+	)
+
+	subCfgValue.FieldByName("ChainParams").Set(
+		reflect.ValueOf(cfg.ActiveNetParams.Params),
+	)
+
 	// Only populate the WalletKit sub-server with the connection if it's
 	// we allow inbound connections.
 	if !cfg.RemoteSigner.AllowInboundConnection {
 		return nil
 	}
-
-	// Extract the WalletKit sub-server config, and populate the config with
-	// the remote signer connection.
-	subCfgValue := extractReflectValue(s.WalletKitRPC)
 
 	if rpckKeyRing, ok := cc.Wc.(*rpcwallet.RPCKeyRing); ok {
 		conn := reflect.ValueOf(rpckKeyRing.RemoteSignerConnection())

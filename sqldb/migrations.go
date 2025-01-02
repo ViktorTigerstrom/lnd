@@ -70,6 +70,21 @@ var (
 			// schema. This is optional and can be disabled by the
 			// user if necessary.
 		},
+		{
+			Name:          "000007_remote_signer_whitelists",
+			Version:       8,
+			SchemaVersion: 7,
+		},
+		{
+			Name:          "000008_remote_signer_local_commitment",
+			Version:       9,
+			SchemaVersion: 8,
+		},
+		{
+			Name:          "000009_remote_signer_channel_info",
+			Version:       10,
+			SchemaVersion: 9,
+		},
 	}
 )
 

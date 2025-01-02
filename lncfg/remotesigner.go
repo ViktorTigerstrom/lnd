@@ -19,6 +19,17 @@ const (
 	// watch-only node with 'remotesigner.allowinboundconnection' set to
 	// true waits for the remote signer to connect.
 	DefaultStartupTimeout = 5 * time.Minute
+
+	// BlindValidationMode is the default validation mode used when the
+	// node acts as a remote signer. In this mode, the node will blindly
+	// sign any request.
+	BlindValidationMode = "blind"
+
+	// HalfValidationMode is a validation mode used when the node acts as
+	// a remote signer. In this mode, the node will only send outgoing
+	// funds to whitelisted addresses or payment hashes (in HTLCs), and
+	// won't sign revoked commitment states.
+	HalfValidationMode = "half"
 )
 
 // RemoteSigner holds the configuration options for how to connect to a remote
@@ -142,6 +153,28 @@ func (w *WatchOnlyNode) Validate() error {
 	}
 
 	return nil
+}
+
+// Validation holds the configuration options for the type of remote signing
+// validation to use when the node acts as a remote signer.
+//
+//nolint:ll
+type Validation struct {
+	// Mode defines the type of validation to use when the node acts as a
+	// remote signer.
+	Mode string `long:"mode" description:"The type of remote signing validation to use, when the node acts as a remote signer, either 'blind' (default) or 'half'. 'blind' means that the node will blindly sign any request. 'half' means that the node will only send outgoing funds to whitelisted addresses or payment hashes (in HTLCs), and won't sign revoked commitment states. There are however some trust involved with 'half' validation, if the remote channel party is also hosting the watch-only node." choice:"blind" choice:"half"`
+
+	// Enable signals if this node a signer node and is expected to connect
+	// to a watch-only node.
+	AllowFunding bool `long:"allowfunding" description:"Signals that we allow funding transactions to be signed by the remote signer, i.e. when the node is the initiator of when opening a channel. Note that there is no way to whitelist peers to open channels to from the validator's perspective. Therefore, if this option is enabled, the validator will accept channels opened to any peer, which may pose a security risk.'."`
+}
+
+// DefaultValidationCfg returns the default Validation config.
+func DefaultValidationCfg() *Validation {
+	return &Validation{
+		Mode:         BlindValidationMode,
+		AllowFunding: false,
+	}
 }
 
 // ConnectionCfg holds the configuration options required when setting up a

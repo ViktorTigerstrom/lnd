@@ -117,7 +117,11 @@ func setupNewStream(t *testing.T,
 
 	errChan := make(chan error)
 	go func() {
-		err := coordinator.Run(stream)
+		getAccountsMock := func() ([]*walletrpc.Account, error) {
+			return make([]*walletrpc.Account, 0), nil
+		}
+
+		err := coordinator.Run(stream, getAccountsMock)
 		if err != nil {
 			errChan <- err
 		}

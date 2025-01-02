@@ -2,6 +2,7 @@ package funding
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -569,6 +570,10 @@ type Config struct {
 	// AuxResolver is an optional interface that can be used to modify the
 	// way contracts are resolved.
 	AuxResolver fn.Option[lnwallet.AuxContractResolver]
+
+	// RemoteSignerInformer is an optional interface that can be used to
+	// inform the remote signer about a new channel.
+	RemoteSignerInformer fn.Option[lnwallet.RemoteSignerInformer]
 }
 
 // Manager acts as an orchestrator/bridge between the wallet's
@@ -1104,6 +1109,14 @@ func (f *Manager) advanceFundingState(channel *channeldb.OpenChannel,
 	f.cfg.AuxResolver.WhenSome(func(s lnwallet.AuxContractResolver) {
 		chanOpts = append(chanOpts, lnwallet.WithAuxResolver(s))
 	})
+	f.cfg.RemoteSignerInformer.WhenSome(
+		func(r lnwallet.RemoteSignerInformer) {
+			chanOpts = append(
+				chanOpts,
+				lnwallet.WithRemoteSignerInformer(r),
+			)
+		},
+	)
 
 	// We create the state-machine object which wraps the database state.
 	lnChannel, err := lnwallet.NewLightningChannel(
@@ -2479,6 +2492,26 @@ func (f *Manager) fundeeProcessFundingCreated(peer lnpeer.Peer,
 	if resCtx.reservation.State() != lnwallet.SentAcceptChannel {
 		return
 	}
+
+	f.cfg.RemoteSignerInformer.WhenSome(
+		func(informer lnwallet.RemoteSignerInformer) {
+			resrv := resCtx.reservation
+
+			err := informer.ForwardFundingInfo(
+				context.TODO(),
+				&fundingOut,
+				resrv.OurContribution().ChannelConfig,
+				resrv.TheirContribution().ChannelConfig,
+				resrv.ChanState().ChanType,
+				false,
+			)
+
+			if err != nil {
+				log.Errorf("Unable to forward funding info: %v",
+					err)
+			}
+		},
+	)
 
 	// Create the channel identifier without setting the active channel ID.
 	cid := newChanIdentifier(pendingChanID)

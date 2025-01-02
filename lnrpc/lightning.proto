@@ -5260,3 +5260,67 @@ message InterceptFeedback {
     */
     bytes replacement_serialized = 3;
 }
+
+message ChannelConfig {
+    // The channel state bounds.
+    ChannelStateBounds channel_state_bounds = 1;
+
+    // The commitment params for the channel.
+    CommitmentParams commitment_params = 2;
+
+    // MultiSigKey is the key to be used within the 2-of-2 output script
+    // for the owner of this channel config.
+    KeyDescriptor multi_sig_key = 3;
+
+    // RevocationBasePoint is the base public key to be used when deriving
+    // revocation keys for the remote node's commitment transaction. This
+    // will be combined along with a per commitment secret to derive a
+    // unique revocation key for each state.
+    KeyDescriptor revocation_base_point = 4;
+
+    // PaymentBasePoint is the base public key to be used when deriving
+    // the key used within the non-delayed pay-to-self output on the
+    // commitment transaction for a node. This will be combined with a
+    // tweak derived from the per-commitment point to ensure unique keys
+    // for each commitment transaction.
+    KeyDescriptor payment_base_point = 5;
+
+    // DelayBasePoint is the base public key to be used when deriving the
+    // key used within the delayed pay-to-self output on the commitment
+    // transaction for a node. This will be combined with a tweak derived
+    // from the per-commitment point to ensure unique keys for each
+    // commitment transaction.
+    KeyDescriptor delay_base_point = 6;
+
+    // HtlcBasePoint is the base public key to be used when deriving the
+    // local HTLC key. The derived key (combined with the tweak derived
+    // from the per-commitment point) is used within the "to self" clause
+    // within any HTLC output scripts.
+    KeyDescriptor htlc_base_point = 7;
+}
+
+message ChannelStateBounds {
+    // The minimum satoshis this node is required to reserve in its balance.
+    uint64 chan_reserve_sat = 1;
+
+    // The maximum amount of coins in millisatoshis that can be pending in this
+    // channel.
+    uint64 max_pending_amt_msat = 2;
+
+    // The smallest HTLC in millisatoshis that this node will accept.
+    uint64 min_htlc = 3;
+
+    // The total number of incoming HTLC's that this node will accept.
+    uint32 max_accepted_htlcs = 4;
+}
+
+message CommitmentParams {
+    // The dust limit for this node.
+    uint64 dust_limit = 1;
+
+    /*
+    The number of blocks to use for the relative time lock in the pay-to-self
+    output of the commitment transaction.
+    */
+    uint32 csv_delay = 11;
+}

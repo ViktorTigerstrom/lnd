@@ -3,6 +3,8 @@ package rpcwallet
 import (
 	"context"
 	"errors"
+	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/lightningnetwork/lnd/lnwallet/validator"
 	"math"
 	"sync"
 	"testing"
@@ -288,6 +290,8 @@ func newTestRemoteSignerClient(t *testing.T,
 
 	client, err := NewOutboundClient(
 		&mockWalletKitServer{}, &mockSignerServer{}, streamFeeder,
+		// TODO: Fix by passing a mock DB instance.
+		validator.NewHalfValidator(nil, &chaincfg.RegressionNetParams),
 		1*time.Second,
 	)
 	require.NoError(t, err)

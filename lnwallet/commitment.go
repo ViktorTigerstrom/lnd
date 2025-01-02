@@ -432,22 +432,32 @@ func sweepSigHash(chanType channeldb.ChannelType) txscript.SigHashType {
 // we are generating the to_local script for.
 func SecondLevelHtlcScript(chanType channeldb.ChannelType, initiator bool,
 	revocationKey, delayKey, commitPoint *btcec.PublicKey,
-	csvDelay, leaseExpiry uint32,
+	csvDelay, leaseExpiry uint32, fundingOutpoint wire.OutPoint,
 	auxLeaf input.AuxTapLeaf) (input.ScriptDescriptor, error) {
 
 	// Create a SignInfo with metadata for the signer.
 	signInfo := input.UnknownOptions(
+		input.SecondLeveLHTLCOutput(),
 		input.CommitPoint(commitPoint),
 		input.CsvDelay(csvDelay),
 		input.LeaseExpiry(leaseExpiry),
+		input.FundingOutpoint(fundingOutpoint),
+		input.AuxLeafOption(auxLeaf),
 	)
 
 	switch {
 	// For taproot channels, the pkScript is a segwit v1 p2tr output.
 	case chanType.IsTaproot():
-		return input.TaprootSecondLevelScriptTree(
+		scriptTree, err := input.TaprootSecondLevelScriptTree(
 			revocationKey, delayKey, csvDelay, auxLeaf,
 		)
+		if err != nil {
+			return nil, err
+		}
+
+		scriptTree.PsbtSignInfo = signInfo
+
+		return scriptTree, nil
 
 	// If we are the initiator of a leased channel, then we have an
 	// additional CLTV requirement in addition to the usual CSV
@@ -1028,9 +1038,11 @@ func CreateCommitTx(chanType channeldb.ChannelType,
 		})
 
 		signInfo = append(signInfo, input.UnknownOptions(
+			input.ToLocalOutput(),
 			input.CommitPoint(keyRing.CommitPoint),
 			input.CsvDelay(uint32(localChanCfg.CsvDelay)),
 			input.LeaseExpiry(leaseExpiry),
+			input.AuxLeafOption(fn.FlattenOption(localAuxLeaf)),
 		))
 	}
 
@@ -1042,9 +1054,11 @@ func CreateCommitTx(chanType channeldb.ChannelType,
 		})
 
 		signInfo = append(signInfo, input.UnknownOptions(
+			input.ToRemoteOutput(),
 			input.CommitPoint(keyRing.CommitPoint),
 			input.CsvDelay(uint32(localChanCfg.CsvDelay)),
 			input.LeaseExpiry(leaseExpiry),
+			input.AuxLeafOption(fn.FlattenOption(remoteAuxLeaf)),
 		))
 	}
 
@@ -1065,8 +1079,11 @@ func CreateCommitTx(chanType channeldb.ChannelType,
 				Value:    int64(AnchorSize),
 			})
 
-			// Placeholder for the info required by the signer.
-			signInfo = append(signInfo, input.SignInfo{})
+			// Add local anchor output type signinfo.
+			signInfo = append(signInfo, input.UnknownOptions(
+				input.LocalAnchorOutput(),
+				input.CommitPoint(keyRing.CommitPoint),
+			))
 		}
 
 		// Add anchor output to remote only if they have a commitment
@@ -1077,8 +1094,11 @@ func CreateCommitTx(chanType channeldb.ChannelType,
 				Value:    int64(AnchorSize),
 			})
 
-			// Placeholder for the unknowns.
-			signInfo = append(signInfo, input.SignInfo{})
+			// Add remote anchor output type signinfo.
+			signInfo = append(signInfo, input.UnknownOptions(
+				input.RemoteAnchorOutput(),
+				input.CommitPoint(keyRing.CommitPoint),
+			))
 		}
 	}
 
@@ -1200,6 +1220,7 @@ func genSegwitV0HtlcScript(chanType channeldb.ChannelType,
 		)
 	}
 	if err != nil {
+		return nil, err
 	}
 
 	// Now that we have the redeem scripts, create the P2WSH public key
@@ -1209,11 +1230,20 @@ func genSegwitV0HtlcScript(chanType channeldb.ChannelType,
 		return nil, err
 	}
 
+	var outputType input.UnknownOption
+	if isIncoming {
+		outputType = input.IncomingHTLCOutput()
+	} else {
+		outputType = input.OfferedHTLCOutput()
+	}
+
 	// Store the derivation info for the HTLC in its matching POutput.
 	signInfo := input.UnknownOptions(
+		outputType,
 		input.CltvExpiry(timeout),
 		input.CommitPoint(keyRing.CommitPoint),
 		input.RHash(rHash[:]),
+		input.AuxLeafOption(fn.None[txscript.TapLeaf]()),
 	)
 
 	return &WitnessScriptDesc{
@@ -1275,16 +1305,34 @@ func GenTaprootHtlcScript(isIncoming bool, whoseCommit lntypes.ChannelParty,
 		)
 	}
 
+	var outputType input.UnknownOption
+	if isIncoming {
+		outputType = input.IncomingHTLCOutput()
+	} else {
+		outputType = input.OfferedHTLCOutput()
+	}
+
+	// Store the derivation info for the HTLC in its matching POutput.
+	signInfo := input.UnknownOptions(
+		outputType,
+		input.CltvExpiry(timeout),
+		input.CommitPoint(keyRing.CommitPoint),
+		input.RHash(rHash[:]),
+		input.AuxLeafOption(auxLeaf),
+	)
+
+	htlcScriptTree.PsbtSignInfo = signInfo
+
 	return htlcScriptTree, err
 }
 
-// genHtlcScript generates the proper P2WSH public key scripts for the HTLC
+// GenHtlcScript generates the proper P2WSH public key scripts for the HTLC
 // output modified by two-bits denoting if this is an incoming HTLC, and if the
 // HTLC is being applied to their commitment transaction or ours. A script
 // multiplexer for the various spending paths is returned. The script path that
 // we need to sign for the remote party (2nd level HTLCs) is also returned
 // along side the multiplexer.
-func genHtlcScript(chanType channeldb.ChannelType, isIncoming bool,
+func GenHtlcScript(chanType channeldb.ChannelType, isIncoming bool,
 	whoseCommit lntypes.ChannelParty, timeout uint32, rHash [32]byte,
 	keyRing *CommitmentKeyRing,
 	auxLeaf input.AuxTapLeaf) (input.ScriptDescriptor, error) {
@@ -1316,7 +1364,7 @@ func addHTLC(commitTx *wire.MsgTx, whoseCommit lntypes.ChannelParty,
 	timeout := paymentDesc.Timeout
 	rHash := paymentDesc.RHash
 
-	scriptInfo, err := genHtlcScript(
+	scriptInfo, err := GenHtlcScript(
 		chanType, isIncoming, whoseCommit, timeout, rHash, keyRing,
 		auxLeaf,
 	)

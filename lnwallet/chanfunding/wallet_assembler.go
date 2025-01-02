@@ -107,6 +107,23 @@ func (f *FullIntent) BindKeys(localKey *keychain.KeyDescriptor,
 	f.remoteKey = remoteKey
 }
 
+// GetLocalConf returns the local channel configuration that was set on the
+// intent.
+func (f *FullIntent) GetLocalConf() *channeldb.ChannelConfig {
+	return f.localConfig
+}
+
+// GetRemoteConf returns the remote channel configuration that was set on the
+// intent.
+func (f *FullIntent) GetRemoteConf() *channeldb.ChannelConfig {
+	return f.remoteConfig
+}
+
+// GetChanType returns the channel type that was set on the intent.
+func (f *FullIntent) GetChanType() channeldb.ChannelType {
+	return f.chanType
+}
+
 // ConfigurePsbt is a method unique to the FullIntent variant. This allows the
 // caller to attach a local and remote channel configuration so that a remote
 // signer can be aware of the parameters used to derive commitment transaction
@@ -170,41 +187,6 @@ func (f *FullIntent) CompileFundingTx(extraInputs []*wire.TxIn,
 	// We'll also pre-compute the OutSignInfo for the SignDescriptor in case
 	// we're doing remote signing.
 	outSignInfo := make([]input.SignInfo, len(fundingTx.TxOut))
-	outSignInfo[multiSigIndex] = input.UnknownOptions(
-		input.LocalMultiSigKey(
-			f.fingerprint, f.coin, &f.localConfig.MultiSigKey,
-		),
-		input.LocalRevocationBasePoint(
-			f.fingerprint, f.coin,
-			&f.localConfig.RevocationBasePoint,
-		),
-		input.LocalPaymentBasePoint(
-			f.fingerprint, f.coin, &f.localConfig.PaymentBasePoint,
-		),
-		input.LocalDelayBasePoint(
-			f.fingerprint, f.coin, &f.localConfig.DelayBasePoint,
-		),
-		input.LocalHtlcBasePoint(
-			f.fingerprint, f.coin, &f.localConfig.HtlcBasePoint,
-		),
-		input.RemoteMultiSigKey(
-			f.remoteConfig.MultiSigKey.PubKey,
-		),
-		input.RemoteRevocationBasePoint(
-			f.remoteConfig.RevocationBasePoint.PubKey,
-		),
-		input.RemotePaymentBasePoint(
-			f.remoteConfig.PaymentBasePoint.PubKey,
-		),
-		input.RemoteDelayBasePoint(
-			f.remoteConfig.DelayBasePoint.PubKey,
-		),
-		input.RemoteHtlcBasePoint(
-			f.remoteConfig.HtlcBasePoint.PubKey,
-		),
-		input.ChannelType(uint64(f.chanType)),
-		input.Initiator(f.initiator),
-	)
 
 	// Next, sign all inputs that are ours, collecting the signatures in
 	// order of the inputs.
@@ -214,8 +196,11 @@ func (f *FullIntent) CompileFundingTx(extraInputs []*wire.TxIn,
 	sigHashes := txscript.NewTxSigHashes(fundingTx, prevOutFetcher)
 	for i, txIn := range fundingTx.TxIn {
 		signDesc := input.SignDescriptor{
-			SigHashes:         sigHashes,
-			OutSignInfo:       outSignInfo,
+			SigHashes:   sigHashes,
+			OutSignInfo: outSignInfo,
+			TransactionType: input.UnknownOptions(
+				input.FundingTransaction(),
+			),
 			PrevOutputFetcher: prevOutFetcher,
 		}
 		// We can only sign this input if it's ours, so we'll ask the

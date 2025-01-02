@@ -526,6 +526,7 @@ func Main() {
 	app.Commands = append(app.Commands, walletCommands()...)
 	app.Commands = append(app.Commands, watchtowerCommands()...)
 	app.Commands = append(app.Commands, wtclientCommands()...)
+	app.Commands = append(app.Commands, remotesignerCommands()...)
 	app.Commands = append(app.Commands, devCommands()...)
 	app.Commands = append(app.Commands, peersCommands()...)
 	app.Commands = append(app.Commands, chainCommands()...)

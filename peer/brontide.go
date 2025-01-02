@@ -423,6 +423,10 @@ type Config struct {
 	// used to manage the bandwidth of peer links.
 	AuxTrafficShaper fn.Option[htlcswitch.AuxTrafficShaper]
 
+	// RemoteSignerInformer is an optional auxiliary traffic shaper that can
+	// be used to add an RemoteSignerInformer to the lightning channels.
+	RemoteSignerInformer fn.Option[lnwallet.RemoteSignerInformer]
+
 	// PongBuf is a slice we'll reuse instead of allocating memory on the
 	// heap. Since only reads will occur and no writes, there is no need
 	// for any synchronization primitives. As a result, it's safe to share
@@ -1081,6 +1085,14 @@ func (p *Brontide) loadActiveChannels(chans []*channeldb.OpenChannel) (
 			func(s lnwallet.AuxContractResolver) {
 				chanOpts = append(
 					chanOpts, lnwallet.WithAuxResolver(s),
+				)
+			},
+		)
+		p.cfg.RemoteSignerInformer.WhenSome(
+			func(r lnwallet.RemoteSignerInformer) {
+				chanOpts = append(
+					chanOpts,
+					lnwallet.WithRemoteSignerInformer(r),
 				)
 			},
 		)
@@ -5105,6 +5117,14 @@ func (p *Brontide) addActiveChannel(c *lnpeer.NewChannel) error {
 	p.cfg.AuxResolver.WhenSome(func(s lnwallet.AuxContractResolver) {
 		chanOpts = append(chanOpts, lnwallet.WithAuxResolver(s))
 	})
+	p.cfg.RemoteSignerInformer.WhenSome(
+		func(r lnwallet.RemoteSignerInformer) {
+			chanOpts = append(
+				chanOpts,
+				lnwallet.WithRemoteSignerInformer(r),
+			)
+		},
+	)
 
 	// If not already active, we'll add this channel to the set of active
 	// channels, so we can look it up later easily according to its channel

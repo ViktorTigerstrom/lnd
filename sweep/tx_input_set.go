@@ -240,8 +240,38 @@ func (b *BudgetInputSet) String() string {
 }
 
 // addInput adds an input to the input set.
-func (b *BudgetInputSet) addInput(input SweeperInput) {
-	b.inputs = append(b.inputs, &input)
+func (b *BudgetInputSet) addInput(sweepInput SweeperInput) {
+	// If we're adding an input with the sweeper, we need to ensure that
+	// the sweeper input gets set to the same SignDesc TransactionType and
+	// OutSignInfo as the other input in the transaction, if such info has
+	// been set. The reason for doing so, is that the remote signer
+	// validator may need that data to properly identify the outputs in the
+	// transaction.
+	for _, in := range b.inputs {
+		if in.Input.SignDesc() == nil {
+			continue
+		}
+
+		txType := in.Input.SignDesc().TransactionType
+
+		if txType != nil {
+			sweepInput.Input.SignDesc().TransactionType = txType
+
+			sweepInput.Input.SignDesc().OutSignInfo =
+				in.Input.SignDesc().OutSignInfo
+
+			log.Debugf("Set custom transaction type for sweeper" +
+				"input")
+
+			// Note that if this added input adds an output to that
+			// transaction, the added output will be also added to
+			// the OutSignInfo when the actual transaction is
+			// constructed.
+			break
+		}
+	}
+
+	b.inputs = append(b.inputs, &sweepInput)
 }
 
 // addWalletInput takes a wallet UTXO and adds it as an input to be used as

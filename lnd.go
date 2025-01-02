@@ -678,9 +678,14 @@ func Main(cfg *Config, lisCfg ListenerCfg, implCfg *ImplementationCfg,
 	// Set up the remote signer client. If cfg.WatchOnlyNode.Enable isn't
 	// set to true, this remote signer client won't run when the server
 	// starts.
-	rscBuilder := rpcwallet.NewRemoteSignerClientBuilder(cfg.WatchOnlyNode)
+	rscBuilder := rpcwallet.NewRemoteSignerClientBuilder(
+		cfg.WatchOnlyNode, cfg.Validation,
+	)
 
-	rsClient, err := rscBuilder.Build(rpcServer.subServers)
+	rsClient, err := rscBuilder.Build(
+		rpcServer.subServers, dbs.RemoteSignerDB,
+		cfg.ActiveNetParams.Params,
+	)
 	if err != nil {
 		return mkErr("unable to create remote signer client", err)
 	}
