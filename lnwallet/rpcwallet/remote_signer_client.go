@@ -1,6 +1,7 @@
 package rpcwallet
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,7 +10,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/btcsuite/btcd/btcutil/psbt"
 	"github.com/btcsuite/btclog/v2"
+	"github.com/lightningnetwork/lnd/fn"
 	"github.com/lightningnetwork/lnd/fn/v2"
 	"github.com/lightningnetwork/lnd/lncfg"
 	"github.com/lightningnetwork/lnd/lnrpc"
@@ -786,6 +789,11 @@ func (r *OutboundClient) process(ctx context.Context,
 		return signResp, nil
 
 	case *walletrpc.SignCoordinatorRequest_SignPsbtRequest:
+		err := r.ValidatePSBT(ctx, reqType.SignPsbtRequest)
+		if err != nil {
+			return nil, err
+		}
+
 		resp, err := r.walletServer.SignPsbt(
 			ctx, reqType.SignPsbtRequest,
 		)
@@ -852,6 +860,28 @@ func (r *OutboundClient) sendResponse(ctx context.Context, resp *signerResponse,
 
 	r.log.TraceS(ctxt, "Sent response to watch-only node",
 		btclog.ClosureAttr("response", formatSignCoordinatorMsg(resp)))
+
+	return nil
+}
+
+func (r *OutboundClient) ValidatePSBT(_ context.Context,
+	req *walletrpc.SignPsbtRequest) error {
+
+	packet, err := psbt.NewFromRawBytes(
+		bytes.NewReader(req.FundedPsbt), false,
+	)
+	if err != nil {
+		log.Debugf("Error parsing PSBT: %v, raw input: %x", err,
+			req.FundedPsbt)
+		return fmt.Errorf("error parsing PSBT: %w", err)
+	}
+
+	for _, output := range packet.Outputs {
+		for _, unknown := range output.Unknowns {
+			log.Infof("1111 unknown key: %v, value: %v",
+				unknown.Key, unknown.Value)
+		}
+	}
 
 	return nil
 }
