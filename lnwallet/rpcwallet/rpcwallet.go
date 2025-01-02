@@ -130,6 +130,9 @@ func (r *RPCKeyRing) SendOutputs(inputs fn.Set[wire.OutPoint],
 				tx, outputFetcher,
 			),
 			PrevOutputFetcher: outputFetcher,
+			TransactionType: input.UnknownOptions(
+				input.DefaultTransaction(), // Needs whitelist
+			),
 		}
 
 		// We can only sign this input if it's ours, so we'll ask the
@@ -900,7 +903,9 @@ func (r *RPCKeyRing) remoteSign(tx *wire.MsgTx, signDesc *input.SignDescriptor,
 		return nil, fmt.Errorf("error converting TX into PSBT: %w", err)
 	}
 
-	err = input.MaybeEnrichPsbt(packet, signDesc.OutSignInfo)
+	err = input.MaybeEnrichPsbt(
+		packet, signDesc.OutSignInfo, signDesc.TransactionType,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("error enriching PSBT outputs: %w", err)
 	}

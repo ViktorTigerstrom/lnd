@@ -3,6 +3,7 @@ package rpcwallet
 import (
 	"context"
 	"errors"
+	"github.com/btcsuite/btcd/chaincfg"
 	"math"
 	"sync"
 	"testing"
@@ -288,7 +289,7 @@ func newTestRemoteSignerClient(t *testing.T,
 
 	client, err := NewOutboundClient(
 		&mockWalletKitServer{}, &mockSignerServer{}, streamFeeder,
-		1*time.Second,
+		1*time.Second, &chaincfg.RegressionNetParams,
 	)
 	require.NoError(t, err)
 	require.NoError(t, client.Start(context.Background()))

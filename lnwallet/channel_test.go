@@ -10339,7 +10339,7 @@ func TestExtractPayDescs(t *testing.T) {
 	// Run the method under test.
 	//
 	// NOTE: we use nil commitment key rings to avoid checking the htlc
-	// scripts(`genHtlcScript`) as it should be tested independently.
+	// scripts(`GenHtlcScript`) as it should be tested independently.
 	incomingPDs, outgoingPDs, err := lnChan.extractPayDescs(
 		0, htlcs, lntypes.Dual[*CommitmentKeyRing]{}, lntypes.Local,
 		fn.None[CommitAuxLeaves](),

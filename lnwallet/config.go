@@ -75,4 +75,8 @@ type Config struct {
 	// AuxSigner is an optional signer that can be used to sign auxiliary
 	// leaves for certain custom channel types.
 	AuxSigner fn.Option[AuxSigner]
+
+	// RemoteSignerInformer is an optional informer that can be used to
+	// inform the remote signer.
+	RemoteSignerInformer fn.Option[RemoteSignerInformer]
 }

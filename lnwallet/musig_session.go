@@ -237,6 +237,11 @@ type MusigSession struct {
 	// instead of the normal BIP 86 tweak when creating the MuSig2
 	// aggregate key and session.
 	tapscriptTweak fn.Option[input.MuSig2Tweaks]
+
+	// remoteSignerInformer is an optional component that can be used to
+	// inform the remote signer about the channel state for informational
+	// purposes only.
+	rsInformer fn.Option[RemoteSignerInformer]
 }
 
 // NewPartialMusigSession creates a new musig2 session given only the
@@ -245,7 +250,8 @@ type MusigSession struct {
 func NewPartialMusigSession(verificationNonce musig2.Nonces,
 	localKey, remoteKey keychain.KeyDescriptor, signer input.MuSig2Signer,
 	inputTxOut *wire.TxOut, commitType MusigCommitType,
-	tapscriptTweak fn.Option[input.MuSig2Tweaks]) *MusigSession {
+	tapscriptTweak fn.Option[input.MuSig2Tweaks],
+	rsInformer fn.Option[RemoteSignerInformer]) *MusigSession {
 
 	signerKeys := []*btcec.PublicKey{localKey.PubKey, remoteKey.PubKey}
 
@@ -262,6 +268,7 @@ func NewPartialMusigSession(verificationNonce musig2.Nonces,
 		signer:         signer,
 		commitType:     commitType,
 		tapscriptTweak: tapscriptTweak,
+		rsInformer:     rsInformer,
 	}
 }
 
@@ -342,7 +349,9 @@ func taprootKeyspendSighash(tx *wire.MsgTx, pkScript []byte,
 // SignCommit signs the passed commitment w/ the current signing (relative
 // remote) nonce. Given nonces should only ever be used once, once the method
 // returns a new nonce is returned, w/ the existing nonce blanked out.
-func (m *MusigSession) SignCommit(tx *wire.MsgTx) (*MusigPartialSig, error) {
+func (m *MusigSession) SignCommit(tx *wire.MsgTx,
+	signDesc *input.SignDescriptor) (*MusigPartialSig, error) {
+
 	switch {
 	// If we already have a session, then we don't need to finalize as this
 	// was done up front (symmetric nonce case, like for co-op close).
@@ -385,6 +394,15 @@ func (m *MusigSession) SignCommit(tx *wire.MsgTx) (*MusigPartialSig, error) {
 	walletLog.Infof("Generating new musig2 sig for session=%x, nonces=%s",
 		m.session.SessionID[:], m.nonces.String())
 
+	m.rsInformer.WhenSome(func(informer RemoteSignerInformer) {
+		err = informer.ForwardMuSig2Info(
+			m.session.SessionID[:], tx, signDesc,
+		)
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	sig, err := m.signer.MuSig2Sign(
 		m.session.SessionID, sigHashMsg, false,
 	)
@@ -408,7 +426,7 @@ func (m *MusigSession) Refresh(verificationNonce *musig2.Nonces,
 
 	return NewPartialMusigSession(
 		*verificationNonce, m.localKey, m.remoteKey, m.signer,
-		m.inputTxOut, m.commitType, m.tapscriptTweak,
+		m.inputTxOut, m.commitType, m.tapscriptTweak, m.rsInformer,
 	), nil
 }
 
@@ -587,6 +605,11 @@ type MusigSessionCfg struct {
 	// TapscriptTweak is an optional tweak that can be used to modify the
 	// MuSig2 public key used in the session.
 	TapscriptTweak fn.Option[chainhash.Hash]
+
+	// RemoteSignerInformer is an optional component that can be used to
+	// inform the remote signer about the channel state for informational
+	// purposes only.
+	RemoteSignerInformer fn.Option[RemoteSignerInformer]
 }
 
 // MusigPairSession houses the two musig2 sessions needed to do funding and
@@ -615,10 +638,12 @@ func NewMusigPairSession(cfg *MusigSessionCfg) *MusigPairSession {
 	localSession := NewPartialMusigSession(
 		cfg.LocalNonce, cfg.LocalKey, cfg.RemoteKey, cfg.Signer,
 		cfg.InputTxOut, LocalMusigCommit, tapscriptTweak,
+		cfg.RemoteSignerInformer,
 	)
 	remoteSession := NewPartialMusigSession(
 		cfg.RemoteNonce, cfg.LocalKey, cfg.RemoteKey, cfg.Signer,
 		cfg.InputTxOut, RemoteMusigCommit, tapscriptTweak,
+		cfg.RemoteSignerInformer,
 	)
 
 	return &MusigPairSession{

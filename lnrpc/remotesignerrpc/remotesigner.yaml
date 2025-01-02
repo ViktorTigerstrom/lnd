@@ -1,0 +1,19 @@
+type: google.api.Service
+config_version: 3
+
+http:
+  rules:
+    - selector: remotesignerrpc.RemoteSigner.WhitelistAddress
+      post: "/v2/remotesigner/addresswhitelist"
+      body: "*"
+    - selector: remotesignerrpc.RemoteSigner.WhitelistedAddresses
+      get: "/v2/remotesigner/addresswhitelist"
+    - selector: remotesignerrpc.RemoteSigner.RemoveWhitelistedAddress
+      delete: "/v2/remotesigner/addresswhitelist/{address}"
+    - selector: remotesignerrpc.RemoteSigner.WhitelistPaymentHash
+      post: "/v2/remotesigner/paymenthashwhitelist"
+      body: "*"
+    - selector: remotesignerrpc.RemoteSigner.WhitelistedPaymentHashes
+      get: "/v2/remotesigner/paymenthashwhitelist"
+    - selector: remotesignerrpc.RemoteSigner.RemoveWhitelistedPaymentHash
+      delete: "/v2/remotesigner/paymenthashwhitelist/{payment_hash}"

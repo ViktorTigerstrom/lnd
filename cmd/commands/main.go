@@ -516,6 +516,12 @@ func Main() {
 		listAliasesCommand,
 		estimateRouteFeeCommand,
 		generateManPageCommand,
+		WhitelistAddressCommand,
+		listWhitelistedAddressesCommand,
+		removeWhitelistedAddressCommand,
+		WhitelistPaymentHashCommand,
+		listWhitelistedPaymentHashesCommand,
+		removeWhitelistedPaymentHashCommand,
 	}
 
 	// Add any extra commands determined by build flags.

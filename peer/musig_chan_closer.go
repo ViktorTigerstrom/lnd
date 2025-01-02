@@ -53,6 +53,7 @@ func (m *MusigChanCloser) ProposalClosingOpts() (
 		*m.remoteNonce, localKey, remoteKey,
 		m.channel.Signer, m.channel.FundingTxOut(),
 		lnwallet.RemoteMusigCommit, tapscriptTweak,
+		m.channel.RemoteSignerInformer,
 	)
 
 	err := m.musigSession.FinalizeSession(*m.localNonce)

@@ -464,6 +464,9 @@ func (s *Server) SignOutputRaw(_ context.Context, in *SignReq) (*SignResp,
 			SigHashes:         sigHashCache,
 			InputIndex:        int(signDesc.InputIndex),
 			PrevOutputFetcher: prevOutputFetcher,
+			TransactionType: input.UnknownOptions(
+				input.DefaultTransaction(), // Needs whitelist
+			),
 		})
 
 		// Are we trying to sign for a Taproot output? Then we need all
@@ -585,6 +588,9 @@ func (s *Server) ComputeInputScript(ctx context.Context,
 			SigHashes:         sigHashCache,
 			PrevOutputFetcher: prevOutputFetcher,
 			InputIndex:        int(signDesc.InputIndex),
+			TransactionType: input.UnknownOptions(
+				input.DefaultTransaction(), // Needs whitelist
+			),
 		})
 	}
 

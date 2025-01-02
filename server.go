@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"github.com/lightningnetwork/lnd/lnwallet/validator"
 	"math/big"
 	prand "math/rand"
 	"net"
@@ -316,6 +317,10 @@ type server struct {
 	miscDB *channeldb.DB
 
 	invoicesDB invoices.InvoiceDB
+
+	remoteSignerDb validator.RemoteSignerDB
+
+	rsInformer fn.Option[lnwallet.RemoteSignerInformer]
 
 	aliasMgr *aliasmgr.Manager
 
@@ -663,6 +668,18 @@ func newServer(cfg *Config, listenAddrs []net.Addr,
 
 	addrSource := channeldb.NewMultiAddrSource(dbs.ChanStateDB, dbs.GraphDB)
 
+	var rsInformer fn.Option[lnwallet.RemoteSignerInformer]
+	if cfg.RemoteSigner.Enable {
+		rpckKeyRing, ok := cc.Wc.(*rpcwallet.RPCKeyRing)
+		if !ok {
+			return nil, errors.New("cc.WC should be RPCKeyRing")
+		}
+
+		rsInformer = fn.Some[lnwallet.RemoteSignerInformer](
+			rpckKeyRing.RemoteSignerConnection(),
+		)
+	}
+
 	s := &server{
 		cfg:            cfg,
 		implCfg:        implCfg,
@@ -719,6 +736,10 @@ func newServer(cfg *Config, listenAddrs []net.Addr,
 		tlsManager: tlsManager,
 
 		remoteSignerClient: remoteSignerClient,
+
+		remoteSignerDb: dbs.RemoteSignerDB,
+
+		rsInformer: rsInformer,
 
 		featureMgr: featureMgr,
 		quit:       make(chan struct{}),
@@ -1458,9 +1479,10 @@ func newServer(cfg *Config, listenAddrs []net.Addr,
 
 			return &pc.Incoming
 		},
-		AuxLeafStore: implCfg.AuxLeafStore,
-		AuxSigner:    implCfg.AuxSigner,
-		AuxResolver:  implCfg.AuxContractResolver,
+		AuxLeafStore:         implCfg.AuxLeafStore,
+		AuxSigner:            implCfg.AuxSigner,
+		AuxResolver:          implCfg.AuxContractResolver,
+		RemoteSignerInformer: rsInformer,
 	}, dbs.ChanStateDB)
 
 	// Select the configuration and funding parameters for Bitcoin.
@@ -1714,6 +1736,7 @@ func newServer(cfg *Config, listenAddrs []net.Addr,
 		AuxFundingController: implCfg.AuxFundingController,
 		AuxSigner:            implCfg.AuxSigner,
 		AuxResolver:          implCfg.AuxContractResolver,
+		RemoteSignerInformer: s.rsInformer,
 	})
 	if err != nil {
 		return nil, err
@@ -4508,6 +4531,7 @@ func (s *server) peerConnected(conn net.Conn, connReq *connmgr.ConnReq,
 		AuxChanCloser:          s.implCfg.AuxChanCloser,
 		AuxResolver:            s.implCfg.AuxContractResolver,
 		AuxTrafficShaper:       s.implCfg.TrafficShaper,
+		RemoteSignerInformer:   s.rsInformer,
 		ShouldFwdExpEndorsement: func() bool {
 			if s.cfg.ProtocolOptions.NoExperimentalEndorsement() {
 				return false
