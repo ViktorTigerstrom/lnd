@@ -1,6 +1,7 @@
 package rpcwallet
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,8 +10,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/btcsuite/btclog/v2"
 	"github.com/lightningnetwork/lnd/fn/v2"
+	"github.com/lightningnetwork/lnd/lnwallet/validator"
+
+	"github.com/btcsuite/btcd/btcutil/psbt"
+	"github.com/btcsuite/btclog/v2"
 	"github.com/lightningnetwork/lnd/lncfg"
 	"github.com/lightningnetwork/lnd/lnrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/signrpc"
@@ -305,6 +309,10 @@ type OutboundClient struct {
 	// watch-only node.
 	maxRetryTimeout time.Duration
 
+	// validator is the validation implementation used by the remote signer
+	// client.
+	validator validator.Validation
+
 	cg       *fn.ContextGuard
 	gManager *fn.GoroutineManager
 }
@@ -317,6 +325,7 @@ type OutboundClient struct {
 func NewOutboundClient(walletServer walletrpc.WalletKitServer,
 	signerServer signrpc.SignerServer,
 	streamFeeder SignCoordinatorStreamFeeder,
+	rsValidator validator.Validation,
 	requestTimeout time.Duration) (*OutboundClient, error) {
 
 	if walletServer == nil || signerServer == nil {
@@ -338,6 +347,7 @@ func NewOutboundClient(walletServer walletrpc.WalletKitServer,
 		maxRetryTimeout: defaultMaxRetryTimeout,
 		cg:              fn.NewContextGuard(),
 		gManager:        fn.NewGoroutineManager(),
+		validator:       rsValidator,
 	}, nil
 }
 
@@ -537,6 +547,29 @@ func (r *OutboundClient) handshake(ctx context.Context, stream *Stream) error {
 	case *completeType:
 		// TODO(viktor): This should verify that the signature in the
 		// complete message is valid.
+
+		switch wType := rType.RegistrationComplete.
+			GetWalletInfo().(type) {
+
+		case *walletrpc.RegistrationComplete_Accounts:
+
+			acctMetaData := &walletrpc.MetadataRequest_Accounts{
+				Accounts: wType.Accounts,
+			}
+
+			metaData := &walletrpc.MetadataRequest{
+				MetadataType: acctMetaData,
+			}
+
+			err := r.validator.AddMetadata(ctx, metaData)
+			if err != nil {
+				return fmt.Errorf("adding account metadata "+
+					"error: %v", err)
+			}
+
+		default:
+
+		}
 		return nil
 
 	// An error occurred during the registration process.
@@ -786,6 +819,17 @@ func (r *OutboundClient) process(ctx context.Context,
 		return signResp, nil
 
 	case *walletrpc.SignCoordinatorRequest_SignPsbtRequest:
+		res, err := r.validator.ValidatePSBT(
+			ctx, reqType.SignPsbtRequest,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		if res.Type == validator.ValidationFailure {
+			return nil, errors.New(res.FailureDetails)
+		}
+
 		resp, err := r.walletServer.SignPsbt(
 			ctx, reqType.SignPsbtRequest,
 		)
@@ -795,6 +839,22 @@ func (r *OutboundClient) process(ctx context.Context,
 
 		rType := &walletrpc.SignCoordinatorResponse_SignPsbtResponse{
 			SignPsbtResponse: resp,
+		}
+
+		signResp.SignResponseType = rType
+
+		return signResp, nil
+
+	case *walletrpc.SignCoordinatorRequest_MetadataRequest:
+		err := r.validator.AddMetadata(
+			ctx, reqType.MetadataRequest,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		rType := &walletrpc.SignCoordinatorResponse_MetadataReceived{
+			MetadataReceived: true,
 		}
 
 		signResp.SignResponseType = rType
@@ -852,6 +912,28 @@ func (r *OutboundClient) sendResponse(ctx context.Context, resp *signerResponse,
 
 	r.log.TraceS(ctxt, "Sent response to watch-only node",
 		btclog.ClosureAttr("response", formatSignCoordinatorMsg(resp)))
+
+	return nil
+}
+
+func (r *OutboundClient) ValidatePSBT(_ context.Context,
+	req *walletrpc.SignPsbtRequest) error {
+
+	packet, err := psbt.NewFromRawBytes(
+		bytes.NewReader(req.FundedPsbt), false,
+	)
+	if err != nil {
+		log.Debugf("Error parsing PSBT: %v, raw input: %x", err,
+			req.FundedPsbt)
+		return fmt.Errorf("error parsing PSBT: %w", err)
+	}
+
+	for _, output := range packet.Outputs {
+		for _, unknown := range output.Unknowns {
+			log.Infof("1111 unknown key: %v, value: %v",
+				unknown.Key, unknown.Value)
+		}
+	}
 
 	return nil
 }

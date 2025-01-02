@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/lightningnetwork/lnd/lnwallet/validator"
 	"net"
 	"os"
 	"path/filepath"
@@ -762,6 +763,7 @@ func (d *DefaultWalletImpl) BuildChainControl(
 		CoinSelectionStrategy: walletConfig.CoinSelectionStrategy,
 		AuxLeafStore:          partialChainControl.Cfg.AuxLeafStore,
 		AuxSigner:             partialChainControl.Cfg.AuxSigner,
+		RemoteSignerInformer:  fn.None[lnwallet.RemoteSignerInformer](),
 	}
 
 	// The broadcast is already always active for neutrino nodes, so we
@@ -897,6 +899,10 @@ func (d *RPCSignerWalletImpl) BuildChainControl(
 		return nil, cleanUp, err
 	}
 
+	var rsInformer = fn.Some[lnwallet.RemoteSignerInformer](
+		rpcKeyRing.RemoteSignerConnection(),
+	)
+
 	// Create, and start the lnwallet, which handles the core payment
 	// channel logic, and exposes control via proxy state machines.
 	lnWalletConfig := lnwallet.Config{
@@ -909,6 +915,7 @@ func (d *RPCSignerWalletImpl) BuildChainControl(
 		ChainIO:               walletController,
 		NetParams:             *walletConfig.NetParams,
 		CoinSelectionStrategy: walletConfig.CoinSelectionStrategy,
+		RemoteSignerInformer:  rsInformer,
 	}
 
 	// We've created the wallet configuration now, so we can finish
@@ -968,6 +975,10 @@ type DatabaseInstances struct {
 	// for native SQL queries for tables that already support it. This may
 	// be nil if the use-native-sql flag was not set.
 	NativeSQLStore *sqldb.BaseDB
+
+	// RemoteSignerDB is the database that stores information required for
+	// the remote signer validator, when lnd acts as a remote signer.
+	RemoteSignerDB validator.RemoteSignerDB
 }
 
 // DefaultDatabaseBuilder is a type that builds the default database backends
@@ -1151,6 +1162,30 @@ func (d *DefaultDatabaseBuilder) BuildDatabase(
 		)
 	} else {
 		dbs.InvoiceDB = dbs.ChanStateDB
+	}
+
+	// Instantiate the RemoteSignerDB
+	if d.cfg.DB.UseNativeSQL {
+		err = validator.ValidateCompatibleConfig(cfg.DB)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		executor := sqldb.NewTransactionExecutor(
+			dbs.NativeSQLStore,
+			func(tx *sql.Tx) validator.SQLRemoteSignerQueries {
+				return dbs.NativeSQLStore.WithTx(tx)
+			},
+		)
+
+		dbs.RemoteSignerDB = validator.NewRemoteSignerSQLStore(
+			executor, clock.NewDefaultClock(),
+		)
+	} else {
+		err = validator.ValidateCompatibleConfig(cfg.DB)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 
 	// Wrap the watchtower client DB and make sure we clean up.

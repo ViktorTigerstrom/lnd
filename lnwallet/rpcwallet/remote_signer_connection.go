@@ -5,6 +5,10 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"github.com/btcsuite/btcd/wire"
+	"github.com/lightningnetwork/lnd/channeldb"
+	"github.com/lightningnetwork/lnd/input"
+	"github.com/lightningnetwork/lnd/lnwallet"
 	"os"
 	"time"
 
@@ -32,6 +36,8 @@ type RemoteSignerConnection interface {
 	// RemoteSignerRequests is an interface that defines the requests that
 	// can be sent to a remote signer.
 	RemoteSignerRequests
+
+	lnwallet.RemoteSignerInformer
 
 	// Timeout returns the set connection timeout for the remote signer.
 	Timeout() time.Duration
@@ -252,6 +258,31 @@ func (r *OutboundConnection) connect(ctx context.Context,
 	return nil
 }
 
+// ForwardLocalCommitment sends the current local commitment transaction
+// to the remote signer strictly for informational purposes.
+//
+// Note: this is part of the RemoteSignerInformer interface.
+func (r *OutboundConnection) ForwardLocalCommitment(_ *wire.MsgTx,
+	_ *input.SignDescriptor) error {
+
+	// We never need to forward local commitment transactions when using an
+	// outbound connection.
+	return nil
+}
+
+// ForwardFundingInfo sends the information regarding the channel when
+// channel has been funded and has a valid funding outpoint.
+//
+// Note: this is part of the RemoteSignerInformer interface.
+func (r *OutboundConnection) ForwardFundingInfo(_ *wire.OutPoint,
+	_ *channeldb.ChannelConfig, _ *channeldb.ChannelConfig,
+	_ channeldb.ChannelType, _ bool) error {
+
+	// We never need to forward funding information when using an outbound
+	// connection.
+	return nil
+}
+
 // A compile time assertion to ensure OutboundConnection meets the
 // RemoteSignerConnection interface.
 var _ RemoteSignerConnection = (*OutboundConnection)(nil)
@@ -266,7 +297,8 @@ type InboundRemoteSignerConnection interface {
 	// stream set up by an outbound remote signer and then blocks until the
 	// stream is closed. Lnd can then send any requests to the remote signer
 	// through the stream.
-	AddConnection(stream StreamServer) error
+	AddConnection(stream StreamServer,
+		getAccounts func() ([]*walletrpc.Account, error)) error
 }
 
 // InboundConnection is an abstraction that manages the inbound connection that
@@ -343,8 +375,10 @@ func (r *InboundConnection) Ping(_ context.Context,
 // stream.
 //
 // NOTE: This is part of the InboundRemoteSignerConnection interface.
-func (r *InboundConnection) AddConnection(stream StreamServer) error {
-	return r.SignCoordinator.Run(stream)
+func (r *InboundConnection) AddConnection(stream StreamServer,
+	getAccounts func() ([]*walletrpc.Account, error)) error {
+
+	return r.SignCoordinator.Run(stream, getAccounts)
 }
 
 // A compile time assertion to ensure InboundConnection meets the

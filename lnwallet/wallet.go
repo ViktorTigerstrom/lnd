@@ -1721,6 +1721,24 @@ func (l *LightningWallet) handleContributionMsg(req *addContributionMsg) {
 			return
 		}
 
+		// TODO:!HERE!!
+		l.Cfg.RemoteSignerInformer.WhenSome(
+			func(informer RemoteSignerInformer) {
+				err := informer.ForwardFundingInfo(
+					chanPoint,
+					fundingIntent.GetLocalConf(),
+					fundingIntent.GetRemoteConf(),
+					fundingIntent.GetChanType(),
+					true,
+				)
+
+				if err != nil {
+					walletLog.Errorf("Unable to forward "+
+						"funding info: %v", err)
+				}
+			},
+		)
+
 		// Finally, we'll populate the relevant information in our
 		// pendingReservation so the rest of the funding flow can
 		// continue as normal.
@@ -1805,6 +1823,9 @@ func (l *LightningWallet) signCommitTx(pendingReservation *ChannelReservation,
 				commitTx,
 			),
 			InputIndex: 0,
+			TransactionType: input.UnknownOptions(
+				input.RemoteCommitmentTransaction(),
+			),
 		}
 		sigTheirCommit, err = l.Cfg.Signer.SignOutputRaw(
 			commitTx, &signDesc,

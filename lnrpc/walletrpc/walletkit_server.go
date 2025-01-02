@@ -253,7 +253,8 @@ type InboundRemoteSignerConnection interface {
 	// stream set up by an outbound remote signer and then blocks until the
 	// stream is closed. Lnd can then send any requests to the remote signer
 	// through the stream.
-	AddConnection(stream WalletKit_SignCoordinatorStreamsServer) error
+	AddConnection(stream WalletKit_SignCoordinatorStreamsServer,
+		getAccounts func() ([]*Account, error)) error
 }
 
 // ServerShell is a shell struct holding a reference to the actual sub-server.
@@ -519,7 +520,40 @@ func (w *WalletKit) SignCoordinatorStreams(
 	// InjectDependencies function while the stream is still open.
 	w.RUnlock()
 
-	return connectionCoordinator.AddConnection(stream)
+	return connectionCoordinator.AddConnection(stream, w.getAccounts)
+}
+
+func (w *WalletKit) getAccounts() ([]*Account, error) {
+	w.RLock()
+	defer w.RUnlock()
+
+	accounts, err := w.cfg.Wallet.ListAccounts(
+		lnwallet.DefaultAccountName, nil,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	rpcAccounts := make([]*Account, 0, len(accounts))
+	for _, account := range accounts {
+		// Don't include the default imported accounts created by the
+		// wallet in the response if they don't have any keys imported.
+		if account.AccountName == waddrmgr.ImportedAddrAccountName &&
+			account.ImportedKeyCount == 0 {
+
+			continue
+		}
+
+		rpcAccount, err := marshalWalletAccount(
+			w.internalScope(), account,
+		)
+		if err != nil {
+			return nil, err
+		}
+		rpcAccounts = append(rpcAccounts, rpcAccount)
+	}
+
+	return rpcAccounts, nil
 }
 
 // LeaseOutput locks an output to the given ID, preventing it from being
@@ -1406,6 +1440,9 @@ func (w *WalletKit) sweepNewInput(op *wire.OutPoint, currentHeight uint32,
 			Value:    int64(utxo.Value),
 		},
 		HashType: txscript.SigHashAll,
+		TransactionType: input.UnknownOptions(
+			input.DefaultTransaction(), // Sweep
+		),
 	}
 
 	var witnessType input.WitnessType

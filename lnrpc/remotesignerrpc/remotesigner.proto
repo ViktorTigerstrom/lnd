@@ -1,0 +1,124 @@
+syntax = "proto3";
+
+package remotesignerrpc;
+
+option go_package = "github.com/lightningnetwork/lnd/lnrpc/remotesignerrpc";
+
+/*
+ * Comments in this file will be directly parsed into the API
+ * Documentation as descriptions of the associated method, message, or field.
+ * These descriptions should go right above the definition of the object, and
+ * can be in either block or // comment format.
+ *
+ * An RPC method can be matched to an lncli command by placing a line in the
+ * beginning of the description in exactly the following format:
+ * lncli: `methodname`
+ *
+ * Failure to specify the exact name of the command will cause documentation
+ * generation to fail.
+ *
+ * More information on how exactly the gRPC documentation is generated from
+ * this proto file can be found here:
+ * https://github.com/lightninglabs/lightning-api
+ */
+
+// RemoteSigner is a service that can be used to add, delete and list addresses
+// and payment hashes from the whitelists.
+service RemoteSigner {
+    /* lncli: `whitelistaddress`
+    WhitelistAddress adds an address to the whitelist. If the address is
+    already whitelisted, this call will fail.
+    */
+    rpc WhitelistAddress (WhitelistAddressRequest)
+        returns (WhitelistAddressResp);
+
+    /* lncli: `listwhitelistedaddresses`
+    WhitelistedAddresses lists the currently whitelisted addresses.
+    */
+    rpc WhitelistedAddresses (WhitelistedAddressesRequest)
+        returns (WhitelistedAddressesResp);
+
+    /* lncli: `removewhitelistedaddress`
+    RemoveWhitelistedAddress removes an address from the whitelist.
+    */
+    rpc RemoveWhitelistedAddress (RemoveWhitelistAddressRequest)
+        returns (RemoveWhitelistAddressResp);
+
+    /* lncli: `whitelistpaymenthash`
+    WhitelistPaymentHash adds an payment hash to the whitelist. If the payment
+    hash is already whitelisted, this call will fail.
+    */
+    rpc WhitelistPaymentHash (WhitelistPaymentHashRequest)
+        returns (WhitelistPaymentHashResp);
+
+    /* lncli: `listwhitelistedpaymenthashes`
+    WhitelistedPaymentHashes lists the currently whitelisted payment hashes.
+    */
+    rpc WhitelistedPaymentHashes (WhitelistedPaymentHashesRequest)
+        returns (WhitelistedPaymentHashesResp);
+
+    /* lncli: `removewhitelistedpaymenthash`
+    RemoveWhitelistedPaymentHash removes a payment hash from the whitelist.
+    */
+    rpc RemoveWhitelistedPaymentHash (RemoveWhitelistPaymentHashRequest)
+        returns (RemoveWhitelistPaymentHashResp);
+}
+
+message WhitelistAddressRequest {
+    // Address to add to the whitelist.
+    string address = 1;
+
+    // The amount to whitelist for the address.
+    int64 amount = 2;
+}
+
+message WhitelistAddressResp {
+}
+
+message WhitelistedAddressesRequest {
+}
+
+message WhitelistedAddressesResp {
+    // List of whitelisted addresses.
+    repeated string addresses = 1;
+}
+
+message RemoveWhitelistAddressRequest {
+    // Address to remove from the whitelist.
+    string address = 1;
+}
+
+message RemoveWhitelistAddressResp {
+    // The returned bool is True if the address was removed from the whitelist.
+    bool removed = 1;
+}
+
+message WhitelistPaymentHashRequest {
+    // Payment hash to add to the whitelist.
+    bytes payment_hash = 1;
+
+    // The amount to whitelist for the payment hash.
+    int64 amount = 2;
+}
+
+message WhitelistPaymentHashResp {
+}
+
+message WhitelistedPaymentHashesRequest {
+}
+
+message WhitelistedPaymentHashesResp {
+    // List of whitelisted payment hashes.
+    repeated bytes payment_hashes = 1;
+}
+
+message RemoveWhitelistPaymentHashRequest {
+    // Payment hash to remove from the whitelist.
+    bytes payment_hash = 1;
+}
+
+message RemoveWhitelistPaymentHashResp {
+    // The returned bool is True if the payment hash was removed from the
+    // whitelist.
+    bool removed = 1;
+}

@@ -562,6 +562,10 @@ type Config struct {
 	// AuxResolver is an optional interface that can be used to modify the
 	// way contracts are resolved.
 	AuxResolver fn.Option[lnwallet.AuxContractResolver]
+
+	// RemoteSignerInformer is an optional interface that can be used to
+	// inform the remote signer about a new channel.
+	RemoteSignerInformer fn.Option[lnwallet.RemoteSignerInformer]
 }
 
 // Manager acts as an orchestrator/bridge between the wallet's
@@ -2465,6 +2469,32 @@ func (f *Manager) fundeeProcessFundingCreated(peer lnpeer.Peer,
 
 	if resCtx.reservation.State() != lnwallet.SentAcceptChannel {
 		return
+	}
+
+	f.cfg.RemoteSignerInformer.WhenSome(
+		func(informer lnwallet.RemoteSignerInformer) {
+			log.Errorf("!!!!!!!!!!!! INFORMING OF FUDNING INFO")
+
+			resrv := resCtx.reservation
+
+			err := informer.ForwardFundingInfo(
+				&fundingOut,
+				resrv.OurContribution().ChannelConfig,
+				resrv.TheirContribution().ChannelConfig,
+				resrv.ChanState().ChanType,
+				false,
+			)
+
+			if err != nil {
+				log.Errorf("Unable to forward funding info: %v",
+					err)
+			}
+		},
+	)
+
+	// TODO: REMOVE!!!!
+	if f.cfg.RemoteSignerInformer.IsNone() {
+		log.Errorf("!!!!!!!!!!!! Remote signer informer is not set")
 	}
 
 	// Create the channel identifier without setting the active channel ID.

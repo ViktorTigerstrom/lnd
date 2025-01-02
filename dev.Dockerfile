@@ -20,7 +20,7 @@ COPY . /go/src/github.com/lightningnetwork/lnd
 #  Install/build lnd.
 RUN cd /go/src/github.com/lightningnetwork/lnd \
 &&  make \
-&&  make install-all tags="signrpc walletrpc chainrpc invoicesrpc peersrpc"
+&&  make install-all tags="signrpc walletrpc chainrpc invoicesrpc peersrpc remotesignerrpc kvdb_postgres kvdb_etcd kvdb_sqlite"
 
 # Start a new, final image to reduce size.
 FROM alpine as final

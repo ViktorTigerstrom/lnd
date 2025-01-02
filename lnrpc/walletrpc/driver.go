@@ -61,9 +61,9 @@ func verifyDependencies(config *Config) error {
 		return fmt.Errorf("FeeEstimator must be set to create " +
 			"WalletKit RPC server")
 
-	case config.Wallet == nil:
-		return fmt.Errorf("Wallet must be set to create WalletKit " +
-			"RPC server")
+	/*case config.Wallet == nil:
+	return fmt.Errorf("Wallet must be set to create WalletKit " +
+		"RPC server")*/
 
 	case config.KeyRing == nil:
 		return fmt.Errorf("KeyRing must be set to create WalletKit " +

@@ -435,6 +435,11 @@ message SignCoordinatorRequest {
         Requests that the remote signer signs the passed PSBT.
         */
         SignPsbtRequest sign_psbt_request = 11;
+
+        /*
+        Forwards metadata to the remote signer.
+        */
+        MetadataRequest metadata_request = 12;
     }
 }
 
@@ -513,7 +518,67 @@ message SignCoordinatorResponse {
         will respond with a SignerError message that details the error.
         */
         SignerError signer_error = 12;
+
+        /*
+        The remote signer's corresponding response to a Local Commitment Info
+        request, to signal that the remote signer has received the local
+        commitment info.
+        */
+        bool metadata_received = 13;
     }
+}
+
+message MetadataRequest {
+    /*
+    The forwarded metadata to the remote signer can only be of certain types.
+    */
+    oneof metadata_type {
+        /*
+        Informs the remote signer of the current local commitment transaction.
+        Note: This is not a request to the remote signer to sign the local
+        commitment, it is strictly only used for informing remote signer about
+        the latest local commitment transaction.
+        */
+        SignPsbtRequest local_commitment_info = 1;
+
+        /*
+        Informs the remote signer of information regarding a new channel when
+        channel has been funded and has a valid funding outpoint.
+        */
+        FundingInfo funding_info = 2;
+
+        /*
+        Informs the remote signer of the accounts the watch-only uses.
+        */
+        ListAccountsResponse accounts = 3;
+    }
+}
+
+message FundingInfo {
+    /*
+    The funding outpoint for the channel.
+    */
+    lnrpc.OutPoint funding_outpoint = 1;
+
+    /*
+    The channel type of the channel.
+     */
+    uint64 channel_type = 2;
+
+    /*
+    Signals if the local node is the initiator of the channel.
+     */
+    bool is_local_initiator = 3;
+
+    /*
+    The local channel config of the channel.
+     */
+    lnrpc.ChannelConfig local_channel_config = 4;
+
+    /*
+    The remote channel config of the channel.
+     */
+    lnrpc.ChannelConfig remote_channel_config = 5;
 }
 
 message SignerError {
@@ -568,6 +633,18 @@ message RegistrationComplete {
     remote signer.
     */
     string registration_info = 2;
+
+    /*
+    Wallet info contains information about the wallet that the remote signer
+    has connected to.
+     */
+    oneof wallet_info {
+        /*
+        Accounts contains the accounts that the watch-only node uses in the
+        wallet.
+         */
+        ListAccountsResponse accounts = 3;
+    }
 }
 
 message ListUnspentRequest {
