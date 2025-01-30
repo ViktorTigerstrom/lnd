@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/lightningnetwork/lnd/lnwallet/validator"
+
 	"github.com/btcsuite/btcd/btcutil/psbt"
 	"github.com/btcsuite/btclog/v2"
 	"github.com/lightningnetwork/lnd/fn"
@@ -307,6 +309,10 @@ type OutboundClient struct {
 	// the maximum backoff period before attempting to reconnect to the
 	// watch-only node.
 	maxRetryTimeout time.Duration
+
+	// validator is the validation implementation used by the remote signer
+	// client.
+	validator validator.Validation
 
 	cg       *fn.ContextGuard
 	gManager *fn.GoroutineManager
@@ -789,9 +795,15 @@ func (r *OutboundClient) process(ctx context.Context,
 		return signResp, nil
 
 	case *walletrpc.SignCoordinatorRequest_SignPsbtRequest:
-		err := r.ValidatePSBT(ctx, reqType.SignPsbtRequest)
+		res, err := r.validator.ValidatePSBT(
+			ctx, reqType.SignPsbtRequest,
+		)
 		if err != nil {
 			return nil, err
+		}
+
+		if res.Type == validator.ValidationFailure {
+			return nil, errors.New(res.FailureDetails)
 		}
 
 		resp, err := r.walletServer.SignPsbt(
