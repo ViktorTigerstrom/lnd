@@ -119,7 +119,8 @@ type WatchOnlyNode struct {
 // DefaultWatchOnlyNodeCfg returns the default WatchOnlyNode config.
 func DefaultWatchOnlyNodeCfg() *WatchOnlyNode {
 	return &WatchOnlyNode{
-		Enable: false,
+		Enable:        false,
+		ConnectionCfg: defaultConnectionCfg(),
 	}
 }
 
@@ -167,7 +168,7 @@ func (c *ConnectionCfg) Validate() error {
 
 	if c.RequestTimeout < time.Second {
 		return fmt.Errorf("requesttimeout of %v is invalid, cannot "+
-			"be smaller than %v", c.Timeout, time.Second)
+			"be smaller than %v", c.RequestTimeout, time.Second)
 	}
 
 	if c.RPCHost == "" {
