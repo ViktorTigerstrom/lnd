@@ -346,6 +346,7 @@ func NewOutboundClient(walletServer walletrpc.WalletKitServer,
 		maxRetryTimeout: defaultMaxRetryTimeout,
 		cg:              fn.NewContextGuard(),
 		gManager:        fn.NewGoroutineManager(),
+		validator:       validator.NewValidator(),
 	}, nil
 }
 
