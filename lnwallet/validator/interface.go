@@ -12,7 +12,7 @@ type Validation interface {
 	// should be signed or rejected, based on the validation rules
 	// implemented by the Validator.
 	ValidatePSBT(ctx context.Context,
-		req *walletrpc.SignPsbtRequest) (ValidationResult, error)
+		req *walletrpc.SignPsbtRequest) (*ValidationResult, error)
 
 	// GetFeatures returns the features supported by the Validator
 	// implementation. This information helps the watch-only node

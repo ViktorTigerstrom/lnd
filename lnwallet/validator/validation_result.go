@@ -14,20 +14,20 @@ type ValidationResult struct {
 
 // ValidationFailureResult returns a validation failure result, including
 // details on why the validation failed.
-func ValidationFailureResult(format string, params ...any) ValidationResult {
+func ValidationFailureResult(format string, params ...any) *ValidationResult {
 	return NewValidationResult(ValidationFailure).withDetails(
 		format, params,
 	)
 }
 
 // ValidationSuccessResult returns a validation success result.
-func ValidationSuccessResult() ValidationResult {
+func ValidationSuccessResult() *ValidationResult {
 	return NewValidationResult(ValidationSuccess)
 }
 
 // NewValidationResult creates a new ValidationResult with the given type.
-func NewValidationResult(t ValidationResultType) ValidationResult {
-	return ValidationResult{
+func NewValidationResult(t ValidationResultType) *ValidationResult {
+	return &ValidationResult{
 		Type: t,
 	}
 }
@@ -35,11 +35,11 @@ func NewValidationResult(t ValidationResultType) ValidationResult {
 // withDetails sets the unstructured human-readable details about why the
 // validation failed.
 func (v ValidationResult) withDetails(format string,
-	params ...any) ValidationResult {
+	params ...any) *ValidationResult {
 
 	v.FailureDetails = fmt.Sprintf(format, params...)
 
-	return v
+	return &v
 }
 
 // ValidationResultType is an enum that represents the result type of a

@@ -19,7 +19,7 @@ func NewValidator() *Validator {
 // ValidatePSBT always determines that the provided SignPsbtRequest should be
 // signed.
 func (r *Validator) ValidatePSBT(_ context.Context,
-	_ *walletrpc.SignPsbtRequest) (ValidationResult, error) {
+	_ *walletrpc.SignPsbtRequest) (*ValidationResult, error) {
 
 	return ValidationSuccessResult(), nil
 }
