@@ -130,6 +130,9 @@ func (r *RPCKeyRing) SendOutputs(inputs fn.Set[wire.OutPoint],
 				tx, outputFetcher,
 			),
 			PrevOutputFetcher: outputFetcher,
+			TransactionType: input.UnknownOptions(
+				input.DefaultTransaction(), // Needs whitelist
+			),
 		}
 
 		// We can only sign this input if it's ours, so we'll ask the
@@ -286,6 +289,11 @@ func (r *RPCKeyRing) FinalizePsbt(packet *psbt.Packet, _ string) error {
 			SigHashes:         sigHashes,
 			InputIndex:        idx,
 			PrevOutputFetcher: prevOutFetcher,
+			TransactionType: input.UnknownOptions(
+				// potentially unnecessary as this call can't be
+				// forwarded to remote signer.
+				input.DefaultTransaction(),
+			),
 		}
 
 		// Find out what UTXO we are signing. Wallets _should_ always
@@ -900,7 +908,9 @@ func (r *RPCKeyRing) remoteSign(tx *wire.MsgTx, signDesc *input.SignDescriptor,
 		return nil, fmt.Errorf("error converting TX into PSBT: %w", err)
 	}
 
-	err = input.MaybeEnrichPsbt(packet, signDesc.OutSignInfo)
+	err = input.MaybeEnrichPsbt(
+		packet, signDesc.OutSignInfo, signDesc.TransactionType,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("error enriching PSBT outputs: %w", err)
 	}

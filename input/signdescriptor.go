@@ -92,6 +92,11 @@ type SignDescriptor struct {
 	// to authorize the signature in the Unknowns field.
 	OutSignInfo []SignInfo
 
+	// TransactionType is an optional field that can be used to pass
+	// information on which type of transaction is requested to be signed,
+	// a remote signer.
+	TransactionType SignInfo
+
 	// Output is the target output which should be signed. The PkScript and
 	// Value fields within the output should be properly populated,
 	// otherwise an invalid signature may be generated.
@@ -329,7 +334,9 @@ func ReadSignDescriptor(r io.Reader, sd *SignDescriptor) error {
 
 // MaybeEnrichPsbt populates a PSBT packet's partial outputs with extra data
 // provided in a sign descriptor, if any.
-func MaybeEnrichPsbt(packet *psbt.Packet, outSignInfo []SignInfo) error {
+func MaybeEnrichPsbt(packet *psbt.Packet, outSignInfo []SignInfo,
+	transactionType SignInfo) error {
+
 	if len(outSignInfo) == 0 {
 		return nil
 	}
@@ -345,6 +352,15 @@ func MaybeEnrichPsbt(packet *psbt.Packet, outSignInfo []SignInfo) error {
 			outSignInfo[i]...,
 		)
 	}
+
+	if transactionType == nil {
+		// If no transaction type is set, we set it to a default
+		// transaction type, which will require that outputs are
+		// whitelisted or internal keys.
+		transactionType = UnknownOptions(DefaultTransaction())
+	}
+
+	packet.Unknowns = append(packet.Unknowns, transactionType...)
 
 	return nil
 }

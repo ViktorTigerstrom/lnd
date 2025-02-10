@@ -1406,6 +1406,9 @@ func (w *WalletKit) sweepNewInput(op *wire.OutPoint, currentHeight uint32,
 			Value:    int64(utxo.Value),
 		},
 		HashType: txscript.SigHashAll,
+		TransactionType: input.UnknownOptions(
+			input.DefaultTransaction(), // Sweep
+		),
 	}
 
 	var witnessType input.WitnessType

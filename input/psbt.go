@@ -37,6 +37,12 @@ var (
 	PsbtKeyTypeOutputRemotePaymentBasePoint    = []byte{0x6e}
 	PsbtKeyTypeOutputRemoteDelayBasePoint      = []byte{0x6f}
 	PsbtKeyTypeOutputRemoteHtlcBasePoint       = []byte{0x70}
+	PsbtKeyRemoteCommitmentTransaction         = []byte{0x71}
+	PsbtKeyLocalCommitmentTransaction          = []byte{0x72}
+	PsbtKeyCooperativeCloseTransaction         = []byte{0x73}
+	PsbtKeyFundingTransaction                  = []byte{0x74}
+	PsbtKeySecondLevelHTLCTransaction          = []byte{0x75}
+	PsbtKeyDefaultTransaction                  = []byte{0x76}
 
 	byteOrder = binary.LittleEndian
 )
@@ -269,6 +275,52 @@ func RemoteHtlcBasePoint(key *btcec.PublicKey) UnknownOption {
 	return wrapUnknownOption(
 		PsbtKeyTypeOutputRemoteHtlcBasePoint,
 		key.SerializeCompressed(),
+	)
+}
+
+// RemoteCommitmentTransaction returns an UnknownOption for remote commitment
+// transaction type.
+func RemoteCommitmentTransaction() UnknownOption {
+	return wrapUnknownOption(
+		PsbtKeyRemoteCommitmentTransaction, []byte{},
+	)
+}
+
+// LocalCommitmentTransaction returns an UnknownOption for local commitment
+// transaction type.
+func LocalCommitmentTransaction() UnknownOption {
+	return wrapUnknownOption(
+		PsbtKeyLocalCommitmentTransaction, []byte{},
+	)
+}
+
+// CooperativeCloseTransaction returns an UnknownOption for cooperative close
+// transaction type.
+func CooperativeCloseTransaction() UnknownOption {
+	return wrapUnknownOption(
+		PsbtKeyCooperativeCloseTransaction, []byte{},
+	)
+}
+
+// FundingTransaction returns an UnknownOption for funding transaction type.
+func FundingTransaction() UnknownOption {
+	return wrapUnknownOption(
+		PsbtKeyFundingTransaction, []byte{},
+	)
+}
+
+// SecondStageHTLCTransaction returns an UnknownOption for second level HTLC
+// transaction type.
+func SecondStageHTLCTransaction() UnknownOption {
+	return wrapUnknownOption(
+		PsbtKeySecondLevelHTLCTransaction, []byte{},
+	)
+}
+
+// DefaultTransaction returns an UnknownOption for the default transaction type.
+func DefaultTransaction() UnknownOption {
+	return wrapUnknownOption(
+		PsbtKeyDefaultTransaction, []byte{},
 	)
 }
 

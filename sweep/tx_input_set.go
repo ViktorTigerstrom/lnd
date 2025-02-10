@@ -75,6 +75,9 @@ func createWalletTxInput(utxo *lnwallet.Utxo) (input.Input, error) {
 			Value:    int64(utxo.Value),
 		},
 		HashType: txscript.SigHashAll,
+		TransactionType: input.UnknownOptions(
+			input.DefaultTransaction(), // Sweep
+		),
 	}
 
 	var witnessType input.WitnessType

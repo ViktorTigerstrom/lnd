@@ -1805,6 +1805,9 @@ func (l *LightningWallet) signCommitTx(pendingReservation *ChannelReservation,
 				commitTx,
 			),
 			InputIndex: 0,
+			TransactionType: input.UnknownOptions(
+				input.RemoteCommitmentTransaction(),
+			),
 		}
 		sigTheirCommit, err = l.Cfg.Signer.SignOutputRaw(
 			commitTx, &signDesc,

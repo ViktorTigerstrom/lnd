@@ -214,8 +214,11 @@ func (f *FullIntent) CompileFundingTx(extraInputs []*wire.TxIn,
 	sigHashes := txscript.NewTxSigHashes(fundingTx, prevOutFetcher)
 	for i, txIn := range fundingTx.TxIn {
 		signDesc := input.SignDescriptor{
-			SigHashes:         sigHashes,
-			OutSignInfo:       outSignInfo,
+			SigHashes:   sigHashes,
+			OutSignInfo: outSignInfo,
+			TransactionType: input.UnknownOptions(
+				input.FundingTransaction(),
+			),
 			PrevOutputFetcher: prevOutFetcher,
 		}
 		// We can only sign this input if it's ours, so we'll ask the

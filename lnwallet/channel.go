@@ -2181,6 +2181,9 @@ func NewBreachRetribution(chanState *channeldb.OpenChannel, stateNum uint64,
 				Value:    ourAmt,
 			},
 			HashType: sweepSigHash(chanState.ChanType),
+			TransactionType: input.UnknownOptions(
+				input.DefaultTransaction(), // SWEEP
+			),
 		}
 
 		// For taproot channels, we'll make sure to set the script path
@@ -2261,6 +2264,9 @@ func NewBreachRetribution(chanState *channeldb.OpenChannel, stateNum uint64,
 				Value:    theirAmt,
 			},
 			HashType: sweepSigHash(chanState.ChanType),
+			TransactionType: input.UnknownOptions(
+				input.DefaultTransaction(), // SWEEP
+			),
 		}
 
 		// For taproot channels, the remote output (the revoked output)
@@ -2401,6 +2407,9 @@ func createHtlcRetribution(chanState *channeldb.OpenChannel,
 		DoubleTweak:   commitmentSecret,
 		WitnessScript: scriptInfo.WitnessScriptToSign(),
 		OutSignInfo:   []input.SignInfo{scriptInfo.SignInfo()},
+		TransactionType: input.UnknownOptions(
+			input.RemoteCommitmentTransaction(),
+		),
 		Output: &wire.TxOut{
 			PkScript: scriptInfo.PkScript(),
 			Value:    int64(htlc.Amt.Val.Int()),
@@ -3250,7 +3259,10 @@ func genRemoteHtlcSigJobs(keyRing *CommitmentKeyRing,
 			PrevOutputFetcher: prevFetcher,
 			HashType:          sigHashType,
 			SigHashes:         hashCache,
-			InputIndex:        0,
+			TransactionType: input.UnknownOptions(
+				input.SecondStageHTLCTransaction(),
+			),
+			InputIndex: 0,
 		}
 		sigJob.OutputIndex = htlc.remoteOutputIndex
 
@@ -3335,6 +3347,9 @@ func genRemoteHtlcSigJobs(keyRing *CommitmentKeyRing,
 			HashType:          sigHashType,
 			SigHashes:         hashCache,
 			InputIndex:        0,
+			TransactionType: input.UnknownOptions(
+				input.SecondStageHTLCTransaction(),
+			),
 		}
 		sigJob.OutputIndex = htlc.remoteOutputIndex
 
@@ -4044,6 +4059,11 @@ func (lc *LightningChannel) SignNextCommitment(
 	// ourselves when we're finished signing.
 	lc.signDesc.OutSignInfo = newCommitView.signInfo
 	defer func() { lc.signDesc.OutSignInfo = []input.SignInfo{} }()
+
+	lc.signDesc.TransactionType = input.UnknownOptions(
+		input.RemoteCommitmentTransaction(),
+	)
+	defer func() { lc.signDesc.TransactionType = nil }()
 
 	err = fn.MapOptionZ(lc.auxSigner, func(a AuxSigner) error {
 		return a.SubmitSecondLevelSigBatch(
@@ -6655,6 +6675,11 @@ func (lc *LightningChannel) getSignedCommitTx() (*wire.MsgTx, error) {
 		SignDesc:  lc.signDesc,
 	}
 
+	// TODO remove this or below
+	inputs.SignDesc.TransactionType = input.UnknownOptions(
+		input.LocalCommitmentTransaction(),
+	)
+
 	if lc.channelState.ChanType.IsTaproot() {
 		inputs.Taproot = fn.Some(TaprootSignedCommitTxInputs{
 			CommitHeight:         lc.currentHeight,
@@ -6697,6 +6722,13 @@ func (lc *LightningChannel) getSignedCommitTx() (*wire.MsgTx, error) {
 		// up after ourselves when we're finished signing.
 		lc.signDesc.OutSignInfo = localCommitmentView.signInfo
 		defer func() { lc.signDesc.OutSignInfo = []input.SignInfo{} }()
+
+		lc.signDesc.TransactionType = input.UnknownOptions(
+			input.LocalCommitmentTransaction(),
+		)
+
+		// TODO remove this or above
+		defer func() { lc.signDesc.TransactionType = nil }()
 	}
 
 	return GetSignedCommitTx(inputs, lc.Signer)
@@ -6883,6 +6915,9 @@ func NewUnilateralCloseSummary(chanState *channeldb.OpenChannel, //nolint:funlen
 					PkScript: selfScript.PkScript(),
 				},
 				HashType: sweepSigHash(chanState.ChanType),
+				TransactionType: input.UnknownOptions(
+					input.DefaultTransaction(), //SWEEP
+				),
 			},
 			MaturityDelay: maturityDelay,
 		}
@@ -7171,6 +7206,9 @@ func newOutgoingHtlcResolution(signer input.Signer,
 			},
 			HashType:          sweepSigHash(chanType),
 			PrevOutputFetcher: prevFetcher,
+			TransactionType: input.UnknownOptions(
+				input.DefaultTransaction(), // Sweep
+			),
 		}
 
 		scriptTree, ok := htlcScriptInfo.(input.TapscriptDescriptor)
@@ -7274,6 +7312,9 @@ func newOutgoingHtlcResolution(signer input.Signer,
 		PrevOutputFetcher: prevFetcher,
 		SigHashes:         hashCache,
 		InputIndex:        0,
+		TransactionType: input.UnknownOptions(
+			input.SecondStageHTLCTransaction(),
+		),
 	}
 
 	htlcSig, err := input.ParseSignature(htlc.Signature)
@@ -7398,6 +7439,9 @@ func newOutgoingHtlcResolution(signer input.Signer,
 		),
 		SignMethod:   signMethod,
 		ControlBlock: ctrlBlock,
+		TransactionType: input.UnknownOptions(
+			input.DefaultTransaction(), // Sweep
+		),
 	}
 
 	// This might be an aux channel, so we'll go ahead and attempt to
@@ -7526,6 +7570,9 @@ func newIncomingHtlcResolution(signer input.Signer,
 			},
 			HashType:          sweepSigHash(chanType),
 			PrevOutputFetcher: prevFetcher,
+			TransactionType: input.UnknownOptions(
+				input.DefaultTransaction(), // Sweep
+			),
 		}
 
 		//nolint:ll
@@ -7623,6 +7670,9 @@ func newIncomingHtlcResolution(signer input.Signer,
 		PrevOutputFetcher: prevFetcher,
 		SigHashes:         hashCache,
 		InputIndex:        0,
+		TransactionType: input.UnknownOptions(
+			input.SecondStageHTLCTransaction(),
+		),
 	}
 
 	htlcSig, err := input.ParseSignature(htlc.Signature)
@@ -7745,6 +7795,9 @@ func newIncomingHtlcResolution(signer input.Signer,
 		PrevOutputFetcher: txscript.NewCannedPrevOutputFetcher(
 			htlcSweepScript.PkScript(),
 			int64(secondLevelOutputAmt),
+		),
+		TransactionType: input.UnknownOptions(
+			input.DefaultTransaction(), // Sweep
 		),
 		SignMethod:   signMethod,
 		ControlBlock: ctrlBlock,
@@ -8155,6 +8208,9 @@ func NewLocalForceCloseSummary(chanState *channeldb.OpenChannel,
 					Value:    localBalance,
 				},
 				HashType: sweepSigHash(chanState.ChanType),
+				TransactionType: input.UnknownOptions(
+					input.DefaultTransaction(), // Sweep
+				),
 			},
 			MaturityDelay: csvTimeout,
 		}
@@ -8452,6 +8508,12 @@ func (lc *LightningChannel) CreateCloseProposal(proposedFee btcutil.Amount,
 		// remote party, using the generated txid to be notified once
 		// the closure transaction has been confirmed.
 		lc.signDesc.SigHashes = input.NewTxSigHashesV0Only(closeTx)
+
+		lc.signDesc.TransactionType = input.UnknownOptions(
+			input.CooperativeCloseTransaction(),
+		)
+		defer func() { lc.signDesc.TransactionType = nil }()
+
 		sig, err = lc.Signer.SignOutputRaw(closeTx, lc.signDesc)
 		if err != nil {
 			return nil, nil, 0, err
@@ -8771,6 +8833,9 @@ func NewAnchorResolution(chanState *channeldb.OpenChannel,
 			Value:    int64(AnchorSize),
 		},
 		HashType: sweepSigHash(chanState.ChanType),
+		TransactionType: input.UnknownOptions(
+			input.DefaultTransaction(), // Sweep
+		),
 	}
 
 	// For taproot outputs, we'll need to ensure that the proper sign
