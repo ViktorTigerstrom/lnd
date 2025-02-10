@@ -4,7 +4,10 @@
 package validator
 
 import (
+	"bytes"
 	"context"
+	"github.com/btcsuite/btcd/btcutil/psbt"
+	"github.com/lightningnetwork/lnd/input"
 	"github.com/lightningnetwork/lnd/lnrpc/walletrpc"
 )
 
@@ -21,18 +24,23 @@ func NewValidator() *Validator {
 func (r *Validator) ValidatePSBT(_ context.Context,
 	req *walletrpc.SignPsbtRequest) (*ValidationResult, error) {
 
-	/*
-		packet, err := psbt.NewFromRawBytes(
-			bytes.NewReader(req.FundedPsbt), false,
-		)
-		if err != nil {
-			return nil, error
-		}
+	packet, err := psbt.NewFromRawBytes(
+		bytes.NewReader(req.FundedPsbt), false,
+	)
+	if err != nil {
+		return nil, err
+	}
 
-		transactionType, err := GetTransactionType(packet)
-		if err != nil {
-			return nil, error
-		}
+	transactionType, err := r.getTransactionType(packet)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Infof("packet is: %v", packet)
+	log.Infof("transaction type for request is: %s",
+		transactionType.String())
+
+	/*
 
 		switch GetTransactionType(packet) {
 
@@ -452,6 +460,34 @@ func (r *Validator) ValidatePSBT(_ context.Context,
 	*/
 
 	return ValidationSuccessResult(), nil
+}
+
+func (r *Validator) getTransactionType(packet *psbt.Packet) (TransactionType,
+	error) {
+
+	for _, unknown := range packet.Unknowns {
+		k := unknown.Key
+		switch {
+		case bytes.Equal(k, input.PsbtKeyLocalCommitmentTransaction):
+			return LocalCommitment, nil
+		case bytes.Equal(k, input.PsbtKeyRemoteCommitmentTransaction):
+			return RemoteCommitment, nil
+		case bytes.Equal(k, input.PsbtKeyCooperativeCloseTransaction):
+			return CooperativeClose, nil
+		case bytes.Equal(k, input.PsbtKeyFundingTransaction):
+			return FundingTransaction, nil
+		case bytes.Equal(k, input.PsbtKeySecondLevelHTLCTransaction):
+			return SecondLevelHTLCTransaction, nil
+		case bytes.Equal(k, input.PsbtKeyDefaultTransaction):
+			return Unknown, nil
+		default:
+			continue
+		}
+	}
+
+	// Transaction type not found. Require whitelisted address or internal
+	// key.
+	return Unknown, nil
 }
 
 // GetFeatures returns the features supported by the Validator
