@@ -1200,6 +1200,7 @@ func genSegwitV0HtlcScript(chanType channeldb.ChannelType,
 		)
 	}
 	if err != nil {
+		return nil, err
 	}
 
 	// Now that we have the redeem scripts, create the P2WSH public key
