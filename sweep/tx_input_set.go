@@ -237,6 +237,29 @@ func (b *BudgetInputSet) String() string {
 
 // addInput adds an input to the input set.
 func (b *BudgetInputSet) addInput(input SweeperInput) {
+	// If we're adding an input with the sweeper, we need to ensure that
+	// the sweeper input gets set to the same SignDesc TransactionType as
+	// the other input in the transaction, if such a TransactionType has
+	// been set. Else the remote signer validator will fail to validate the
+	// transaction when it's being asked to sign the sweeper input, as it'll
+	// then use the default transaction type, which might not represent all
+	// outputs in the tx.
+	for _, currentInput := range b.inputs {
+		if currentInput.Input.SignDesc() == nil {
+			log.Errorf("an existing input in the sweeper input "+
+				"set has no sign desc: %v", currentInput.Input)
+
+			continue
+		}
+		txType := currentInput.Input.SignDesc().TransactionType
+
+		if txType != nil {
+			input.Input.SignDesc().TransactionType = txType
+
+			break
+		}
+	}
+
 	b.inputs = append(b.inputs, &input)
 }
 

@@ -2,6 +2,9 @@ package input
 
 import (
 	"encoding/binary"
+	"encoding/hex"
+	"github.com/btcsuite/btcd/wire"
+	"github.com/lightningnetwork/lnd/lntypes"
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
@@ -36,13 +39,22 @@ var (
 	PsbtKeyTypeOutputRemoteRevocationBasePoint = []byte{0x6d}
 	PsbtKeyTypeOutputRemotePaymentBasePoint    = []byte{0x6e}
 	PsbtKeyTypeOutputRemoteDelayBasePoint      = []byte{0x6f}
+	PsbtKeyTypeOutputFundingPoint              = []byte{0x50}
 	PsbtKeyTypeOutputRemoteHtlcBasePoint       = []byte{0x70}
 	PsbtKeyRemoteCommitmentTransaction         = []byte{0x71}
 	PsbtKeyLocalCommitmentTransaction          = []byte{0x72}
 	PsbtKeyCooperativeCloseTransaction         = []byte{0x73}
 	PsbtKeyFundingTransaction                  = []byte{0x74}
-	PsbtKeySecondLevelHTLCTransaction          = []byte{0x75}
-	PsbtKeyDefaultTransaction                  = []byte{0x76}
+	PsbtKeyLocalSecondLevelHTLCTransaction     = []byte{0x75}
+	PsbtKeyRemoteSecondLevelHTLCTransaction    = []byte{0x76}
+	PsbtKeyDefaultTransaction                  = []byte{0x77}
+	PsbtKeyOutputTypeIncomingHTLC              = []byte{0x78}
+	PsbtKeyOutputTypeOfferedHTLC               = []byte{0x79}
+	PsbtKeyOutputTypeToRemote                  = []byte{0x80}
+	PsbtKeyOutputTypeToLocal                   = []byte{0x81}
+	PsbtKeyOutputTypeRemoteAnchor              = []byte{0x82}
+	PsbtKeyOutputTypeLocalAnchor               = []byte{0x83}
+	PsbtKeyOutputTypeSecondLevelHTLC           = []byte{0x84}
 
 	byteOrder = binary.LittleEndian
 )
@@ -168,6 +180,42 @@ func CommitPoint(point *btcec.PublicKey) UnknownOption {
 		PsbtKeyTypeOutputCommitPoint,
 		point.SerializeCompressed(),
 	)
+}
+
+// FundingOutpoint returns an UnknownOption for the funding outpoint.
+func FundingOutpoint(fundingOutpoint wire.OutPoint) (UnknownOption, error) {
+	fundingOutpointBytes, err := fundingOutpointToBytes(fundingOutpoint)
+	if err != nil {
+		return nil, err
+	}
+
+	return wrapUnknownOption(
+		PsbtKeyTypeOutputFundingPoint,
+		fundingOutpointBytes,
+	), nil
+}
+
+// Convert FundingOutpoint to []byte
+func fundingOutpointToBytes(outpoint wire.OutPoint) ([]byte, error) {
+	// Decode the txid (hex string) to bytes
+	txidBytes, err := hex.DecodeString(outpoint.Hash.String())
+	if err != nil {
+		return nil, err
+	}
+
+	// Reverse the txid bytes (Bitcoin stores txids little-endian internally)
+	for i := 0; i < len(txidBytes)/2; i++ {
+		txidBytes[i], txidBytes[len(txidBytes)-1-i] = txidBytes[len(txidBytes)-1-i], txidBytes[i]
+	}
+
+	// Convert the output index (uint32) to little-endian byte slice
+	indexBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(indexBytes, outpoint.Index)
+
+	// Concatenate txidBytes (32 bytes) + indexBytes (4 bytes)
+	finalBytes := append(txidBytes, indexBytes...)
+
+	return finalBytes, nil
 }
 
 // RHash returns an UnknownOption for the rHash.
@@ -309,18 +357,96 @@ func FundingTransaction() UnknownOption {
 	)
 }
 
-// SecondStageHTLCTransaction returns an UnknownOption for second level HTLC
+// SecondLevelHTLCTransaction returns an UnknownOption for second level HTLC
 // transaction type.
-func SecondStageHTLCTransaction() UnknownOption {
-	return wrapUnknownOption(
-		PsbtKeySecondLevelHTLCTransaction, []byte{},
-	)
+func SecondLevelHTLCTransaction(
+	whoseCommit lntypes.ChannelParty) UnknownOption {
+
+	if whoseCommit.IsLocal() {
+		return wrapUnknownOption(
+			PsbtKeyLocalSecondLevelHTLCTransaction, []byte{},
+		)
+	} else {
+		return wrapUnknownOption(
+			PsbtKeyRemoteSecondLevelHTLCTransaction, []byte{},
+		)
+	}
 }
 
 // DefaultTransaction returns an UnknownOption for the default transaction type.
 func DefaultTransaction() UnknownOption {
 	return wrapUnknownOption(
 		PsbtKeyDefaultTransaction, []byte{},
+	)
+}
+
+// IncomingHTLCOutput returns an UnknownOption for an incoming HTLC output type.
+func IncomingHTLCOutput() UnknownOption {
+	return wrapUnknownOption(
+		PsbtKeyOutputTypeIncomingHTLC, []byte{},
+	)
+}
+
+// OfferedHTLCOutput returns an UnknownOption for an offered HTLC output type.
+func OfferedHTLCOutput() UnknownOption {
+	return wrapUnknownOption(
+		PsbtKeyOutputTypeOfferedHTLC, []byte{},
+	)
+}
+
+// ToRemoteOutput returns an UnknownOption for the to_remote output type. Note
+// that this is from the perspective of the transaction itself, and the local
+// node is therefore not always the to_local output. I.e. the output for the
+// node itself is the to_remote output if this UnknownOption is set for an
+// output on the remote commitment transaction, but not for the local commitment
+// transaction.
+func ToRemoteOutput() UnknownOption {
+	return wrapUnknownOption(
+		PsbtKeyOutputTypeToRemote, []byte{},
+	)
+}
+
+// ToLocalOutput returns an UnknownOption for the to_local output type. Note
+// that this is from the perspective of the transaction itself, and the local
+// node is therefore not always the to_local output. I.e. the output for the
+// node itself is the to_local output if this UnknownOption is set for an
+// output on the local commitment transaction, but not for the remote commitment
+// transaction.
+func ToLocalOutput() UnknownOption {
+	return wrapUnknownOption(
+		PsbtKeyOutputTypeToLocal, []byte{},
+	)
+}
+
+// RemoteAnchorOutput returns an UnknownOption for the remote anchor output
+// type. Note that this is from the perspective of the transaction itself, and
+// the local node is therefore not always the local anchor output. I.e. the
+// anchor output for the node itself is the remote anchor output if this
+// UnknownOption is set for an output on the remote commitment transaction,
+// but not for the local commitment transaction.
+func RemoteAnchorOutput() UnknownOption {
+	return wrapUnknownOption(
+		PsbtKeyOutputTypeRemoteAnchor, []byte{},
+	)
+}
+
+// LocalAnchorOutput returns an UnknownOption for the local anchor output
+// type. Note that this is from the perspective of the transaction itself, and
+// the local node is therefore not always the local anchor output. I.e. the
+// anchor output for the node itself is the local anchor output if this
+// UnknownOption is set for an output on the local commitment transaction,
+// but not for the remote commitment transaction.
+func LocalAnchorOutput() UnknownOption {
+	return wrapUnknownOption(
+		PsbtKeyOutputTypeLocalAnchor, []byte{},
+	)
+}
+
+// SecondLeveLHTLCOutput returns an UnknownOption for the second level HTLC
+// output type.
+func SecondLeveLHTLCOutput() UnknownOption {
+	return wrapUnknownOption(
+		PsbtKeyOutputTypeSecondLevelHTLC, []byte{},
 	)
 }
 

@@ -516,7 +516,7 @@ func (lc *LightningChannel) diskHtlcToPayDesc(feeRate chainfee.SatPerKWeight,
 	)
 	localCommitKeys := commitKeys.GetForParty(lntypes.Local)
 	if !isDustLocal && localCommitKeys != nil {
-		scriptInfo, err := genHtlcScript(
+		scriptInfo, err := GenHtlcScript(
 			chanType, htlc.Incoming, lntypes.Local,
 			htlc.RefundTimeout, htlc.RHash, localCommitKeys,
 			auxLeaf,
@@ -533,7 +533,7 @@ func (lc *LightningChannel) diskHtlcToPayDesc(feeRate chainfee.SatPerKWeight,
 	)
 	remoteCommitKeys := commitKeys.GetForParty(lntypes.Remote)
 	if !isDustRemote && remoteCommitKeys != nil {
-		scriptInfo, err := genHtlcScript(
+		scriptInfo, err := GenHtlcScript(
 			chanType, htlc.Incoming, lntypes.Remote,
 			htlc.RefundTimeout, htlc.RHash, remoteCommitKeys,
 			auxLeaf,
@@ -1119,7 +1119,7 @@ func (lc *LightningChannel) logUpdateToPayDesc(logUpdate *channeldb.LogUpdate,
 				},
 			)(auxLeaves)
 
-			scriptInfo, err := genHtlcScript(
+			scriptInfo, err := GenHtlcScript(
 				lc.channelState.ChanType, false, lntypes.Remote,
 				wireMsg.Expiry, wireMsg.PaymentHash,
 				remoteCommitKeys, auxLeaf,
@@ -2367,7 +2367,8 @@ func createHtlcRetribution(chanState *channeldb.OpenChannel,
 	secondLevelScript, err := SecondLevelHtlcScript(
 		chanState.ChanType, isRemoteInitiator,
 		keyRing.RevocationKey, keyRing.ToLocalKey, keyRing.CommitPoint,
-		theirDelay, leaseExpiry, fn.FlattenOption(secondLevelAuxLeaf),
+		theirDelay, leaseExpiry, chanState.FundingOutpoint,
+		fn.FlattenOption(secondLevelAuxLeaf),
 	)
 	if err != nil {
 		return emptyRetribution, err
@@ -2392,7 +2393,7 @@ func createHtlcRetribution(chanState *channeldb.OpenChannel,
 			})(htlc.HtlcIndex.ValOpt())
 		},
 	)(auxLeaves)
-	scriptInfo, err := genHtlcScript(
+	scriptInfo, err := GenHtlcScript(
 		chanState.ChanType, htlc.Incoming.Val, lntypes.Remote,
 		htlc.RefundTimeout.Val, htlc.RHash.Val, keyRing,
 		fn.FlattenOption(htlcLeaf),
@@ -3233,7 +3234,7 @@ func genRemoteHtlcSigJobs(keyRing *CommitmentKeyRing,
 			chanType, isRemoteInitiator, op, outputAmt,
 			htlc.Timeout, uint32(remoteChanCfg.CsvDelay),
 			leaseExpiry, keyRing.RevocationKey, keyRing.ToLocalKey,
-			keyRing.CommitPoint, auxLeaf,
+			keyRing.CommitPoint, chanState.FundingOutpoint, auxLeaf,
 		)
 		if err != nil {
 			return nil, nil, nil, err
@@ -3260,7 +3261,7 @@ func genRemoteHtlcSigJobs(keyRing *CommitmentKeyRing,
 			HashType:          sigHashType,
 			SigHashes:         hashCache,
 			TransactionType: input.UnknownOptions(
-				input.SecondStageHTLCTransaction(),
+				input.SecondLevelHTLCTransaction(lntypes.Remote),
 			),
 			InputIndex: 0,
 		}
@@ -3320,7 +3321,7 @@ func genRemoteHtlcSigJobs(keyRing *CommitmentKeyRing,
 			chanType, isRemoteInitiator, op, outputAmt,
 			uint32(remoteChanCfg.CsvDelay), leaseExpiry,
 			keyRing.RevocationKey, keyRing.ToLocalKey,
-			keyRing.CommitPoint, auxLeaf,
+			keyRing.CommitPoint, chanState.FundingOutpoint, auxLeaf,
 		)
 		if err != nil {
 			return nil, nil, nil, err
@@ -3348,7 +3349,7 @@ func genRemoteHtlcSigJobs(keyRing *CommitmentKeyRing,
 			SigHashes:         hashCache,
 			InputIndex:        0,
 			TransactionType: input.UnknownOptions(
-				input.SecondStageHTLCTransaction(),
+				input.SecondLevelHTLCTransaction(lntypes.Remote),
 			),
 		}
 		sigJob.OutputIndex = htlc.remoteOutputIndex
@@ -4863,6 +4864,7 @@ func genHtlcSigValidationJobs(chanState *channeldb.OpenChannel,
 					outputAmt, uint32(localChanCfg.CsvDelay),
 					leaseExpiry, keyRing.RevocationKey,
 					keyRing.ToLocalKey, keyRing.CommitPoint,
+					chanState.FundingOutpoint,
 					auxLeaf,
 				)
 				if err != nil {
@@ -4958,6 +4960,7 @@ func genHtlcSigValidationJobs(chanState *channeldb.OpenChannel,
 					uint32(localChanCfg.CsvDelay),
 					leaseExpiry, keyRing.RevocationKey,
 					keyRing.ToLocalKey, keyRing.CommitPoint,
+					chanState.FundingOutpoint,
 					auxLeaf,
 				)
 				if err != nil {
@@ -7163,7 +7166,7 @@ func newOutgoingHtlcResolution(signer input.Signer,
 	auxLeaf := fn.FlatMapOption(func(l CommitAuxLeaves) input.AuxTapLeaf {
 		return l.OutgoingHtlcLeaves[htlc.HtlcIndex].AuxTapLeaf
 	})(auxLeaves)
-	htlcScriptInfo, err := genHtlcScript(
+	htlcScriptInfo, err := GenHtlcScript(
 		chanType, false, whoseCommit, htlc.RefundTimeout, htlc.RHash,
 		keyRing, auxLeaf,
 	)
@@ -7288,7 +7291,7 @@ func newOutgoingHtlcResolution(signer input.Signer,
 		chanType, isCommitFromInitiator, op, secondLevelOutputAmt,
 		htlc.RefundTimeout, csvDelay, leaseExpiry,
 		keyRing.RevocationKey, keyRing.ToLocalKey, keyRing.CommitPoint,
-		secondLevelAuxLeaf,
+		chanState.FundingOutpoint, secondLevelAuxLeaf,
 	)
 	if err != nil {
 		return nil, err
@@ -7313,7 +7316,7 @@ func newOutgoingHtlcResolution(signer input.Signer,
 		SigHashes:         hashCache,
 		InputIndex:        0,
 		TransactionType: input.UnknownOptions(
-			input.SecondStageHTLCTransaction(),
+			input.SecondLevelHTLCTransaction(whoseCommit),
 		),
 	}
 
@@ -7375,7 +7378,8 @@ func newOutgoingHtlcResolution(signer input.Signer,
 		htlcSweepScript, err = SecondLevelHtlcScript(
 			chanType, isCommitFromInitiator, keyRing.RevocationKey,
 			keyRing.ToLocalKey, keyRing.CommitPoint, csvDelay,
-			leaseExpiry, secondLevelAuxLeaf,
+			leaseExpiry, chanState.FundingOutpoint,
+			secondLevelAuxLeaf,
 		)
 		if err != nil {
 			return nil, err
@@ -7527,7 +7531,7 @@ func newIncomingHtlcResolution(signer input.Signer,
 	auxLeaf := fn.FlatMapOption(func(l CommitAuxLeaves) input.AuxTapLeaf {
 		return l.IncomingHtlcLeaves[htlc.HtlcIndex].AuxTapLeaf
 	})(auxLeaves)
-	scriptInfo, err := genHtlcScript(
+	scriptInfo, err := GenHtlcScript(
 		chanType, true, whoseCommit, htlc.RefundTimeout, htlc.RHash,
 		keyRing, auxLeaf,
 	)
@@ -7647,7 +7651,8 @@ func newIncomingHtlcResolution(signer input.Signer,
 	successTx, successSignInfo, err := CreateHtlcSuccessTx(
 		chanType, isCommitFromInitiator, op, secondLevelOutputAmt,
 		csvDelay, leaseExpiry, keyRing.RevocationKey,
-		keyRing.ToLocalKey, keyRing.CommitPoint, secondLevelAuxLeaf,
+		keyRing.ToLocalKey, keyRing.CommitPoint,
+		chanState.FundingOutpoint, secondLevelAuxLeaf,
 	)
 	if err != nil {
 		return nil, err
@@ -7671,7 +7676,7 @@ func newIncomingHtlcResolution(signer input.Signer,
 		SigHashes:         hashCache,
 		InputIndex:        0,
 		TransactionType: input.UnknownOptions(
-			input.SecondStageHTLCTransaction(),
+			input.SecondLevelHTLCTransaction(whoseCommit),
 		),
 	}
 
@@ -7734,7 +7739,8 @@ func newIncomingHtlcResolution(signer input.Signer,
 		htlcSweepScript, err = SecondLevelHtlcScript(
 			chanType, isCommitFromInitiator, keyRing.RevocationKey,
 			keyRing.ToLocalKey, keyRing.CommitPoint, csvDelay,
-			leaseExpiry, secondLevelAuxLeaf,
+			leaseExpiry, chanState.FundingOutpoint,
+			secondLevelAuxLeaf,
 		)
 		if err != nil {
 			return nil, err

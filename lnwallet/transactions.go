@@ -53,7 +53,8 @@ var (
 func CreateHtlcSuccessTx(chanType channeldb.ChannelType, initiator bool,
 	htlcOutput wire.OutPoint, htlcAmt btcutil.Amount, csvDelay,
 	leaseExpiry uint32, revocationKey, delayKey,
-	commitPoint *btcec.PublicKey, auxLeaf input.AuxTapLeaf) (
+	commitPoint *btcec.PublicKey, fundingOutpoint wire.OutPoint,
+	auxLeaf input.AuxTapLeaf) (
 	*wire.MsgTx, []input.SignInfo, error) {
 
 	// Create a version two transaction (as the success version of this
@@ -74,7 +75,7 @@ func CreateHtlcSuccessTx(chanType channeldb.ChannelType, initiator bool,
 	// HTLC outputs.
 	scriptInfo, err := SecondLevelHtlcScript(
 		chanType, initiator, revocationKey, delayKey, commitPoint,
-		csvDelay, leaseExpiry, auxLeaf,
+		csvDelay, leaseExpiry, fundingOutpoint, auxLeaf,
 	)
 	if err != nil {
 		return nil, nil, err
@@ -116,6 +117,7 @@ func CreateHtlcTimeoutTx(chanType channeldb.ChannelType, initiator bool,
 	htlcOutput wire.OutPoint, htlcAmt btcutil.Amount,
 	cltvExpiry, csvDelay, leaseExpiry uint32,
 	revocationKey, delayKey, commitPoint *btcec.PublicKey,
+	fundingOutpoint wire.OutPoint,
 	auxLeaf input.AuxTapLeaf) (*wire.MsgTx, []input.SignInfo, error) {
 
 	// Create a version two transaction (as the success version of this
@@ -140,7 +142,7 @@ func CreateHtlcTimeoutTx(chanType channeldb.ChannelType, initiator bool,
 	// HTLC outputs.
 	scriptInfo, err := SecondLevelHtlcScript(
 		chanType, initiator, revocationKey, delayKey, commitPoint,
-		csvDelay, leaseExpiry, auxLeaf,
+		csvDelay, leaseExpiry, fundingOutpoint, auxLeaf,
 	)
 	if err != nil {
 		return nil, nil, err
