@@ -12,6 +12,8 @@ import (
 type Querier interface {
 	DeleteCanceledInvoices(ctx context.Context) (sql.Result, error)
 	DeleteInvoice(ctx context.Context, arg DeleteInvoiceParams) (sql.Result, error)
+	DeleteWhitelistedAddress(ctx context.Context, address string) (sql.Result, error)
+	DeleteWhitelistedPaymentHash(ctx context.Context, paymentHash []byte) (sql.Result, error)
 	FetchAMPSubInvoiceHTLCs(ctx context.Context, arg FetchAMPSubInvoiceHTLCsParams) ([]FetchAMPSubInvoiceHTLCsRow, error)
 	FetchAMPSubInvoices(ctx context.Context, arg FetchAMPSubInvoicesParams) ([]AmpSubInvoice, error)
 	FetchSettledAMPSubInvoices(ctx context.Context, arg FetchSettledAMPSubInvoicesParams) ([]FetchSettledAMPSubInvoicesRow, error)
@@ -25,11 +27,17 @@ type Querier interface {
 	GetInvoiceFeatures(ctx context.Context, invoiceID int64) ([]InvoiceFeature, error)
 	GetInvoiceHTLCCustomRecords(ctx context.Context, invoiceID int64) ([]GetInvoiceHTLCCustomRecordsRow, error)
 	GetInvoiceHTLCs(ctx context.Context, invoiceID int64) ([]InvoiceHtlc, error)
+	GetWhitelistedAddress(ctx context.Context, address string) (AddressWhitelist, error)
+	GetWhitelistedPaymentHash(ctx context.Context, paymentHash []byte) (PaymentHashWhitelist, error)
 	InsertAMPSubInvoiceHTLC(ctx context.Context, arg InsertAMPSubInvoiceHTLCParams) error
 	InsertInvoice(ctx context.Context, arg InsertInvoiceParams) (int64, error)
 	InsertInvoiceFeature(ctx context.Context, arg InsertInvoiceFeatureParams) error
 	InsertInvoiceHTLC(ctx context.Context, arg InsertInvoiceHTLCParams) (int64, error)
 	InsertInvoiceHTLCCustomRecord(ctx context.Context, arg InsertInvoiceHTLCCustomRecordParams) error
+	InsertWhitelistedAddress(ctx context.Context, arg InsertWhitelistedAddressParams) (int64, error)
+	InsertWhitelistedPaymentHash(ctx context.Context, arg InsertWhitelistedPaymentHashParams) (int64, error)
+	ListWhitelistedAddresses(ctx context.Context) ([]AddressWhitelist, error)
+	ListWhitelistedPaymentHashes(ctx context.Context) ([]PaymentHashWhitelist, error)
 	NextInvoiceSettleIndex(ctx context.Context) (int64, error)
 	OnAMPSubInvoiceCanceled(ctx context.Context, arg OnAMPSubInvoiceCanceledParams) error
 	OnAMPSubInvoiceCreated(ctx context.Context, arg OnAMPSubInvoiceCreatedParams) error

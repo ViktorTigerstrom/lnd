@@ -8,6 +8,10 @@ import (
 	"context"
 	"fmt"
 	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/btcutil/hdkeychain"
+	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/lightningnetwork/lnd/channeldb"
 	"github.com/lightningnetwork/lnd/lnrpc"
@@ -20,11 +24,15 @@ import (
 )
 
 // Validator is currently a no-op validator that runs in the production env.
-type Validator struct{}
+type Validator struct {
+	network *chaincfg.Params
+}
 
 // NewValidator creates a new Validator instance.
-func NewValidator() *Validator {
-	return &Validator{}
+func NewValidator(network *chaincfg.Params) *Validator {
+	return &Validator{
+		network: network,
+	}
 }
 
 // ValidatePSBT always determines that the provided SignPsbtRequest should be
@@ -1406,12 +1414,24 @@ func (r *Validator) validateCooperativeClose(
 
 	// Else the tx should have 2 outputs, where one of the outputs
 	// should be ours.
-	for _, output := range packet.Outputs {
-
+	for oIndex, output := range packet.Outputs {
 		// isOurOutput checks if the output address is derived from a
 		// local key, or is a whitelisted address
 		isOurOutput := func(output psbt.POutput) bool {
-			return true
+			// TODO: This should be replaced with the correct
+			// function that checks if the output is internal.
+
+			isInternal, err := r.isAddressInternal(
+				nil, nil, 10000,
+				packet.UnsignedTx.TxOut[oIndex].PkScript,
+			)
+			if err != nil {
+				return false
+			}
+
+			// TODO: check if the output is whitelisted
+
+			return isInternal
 		}
 
 		if isOurOutput(output) {
@@ -1444,7 +1464,7 @@ func (r *Validator) validateLocalSecondLevelHTLCTx(
 		sloFound bool
 	)
 
-	for _, output := range packet.Outputs {
+	for outputIndex, output := range packet.Outputs {
 		if len(output.Unknowns) <= 0 {
 			// Default sweep output
 
@@ -1506,7 +1526,8 @@ func (r *Validator) validateLocalSecondLevelHTLCTx(
 
 			// TODO: Needs to be correct byte arrays being matched.
 			scriptMatches := bytes.Equal(
-				secondLevelScript.PkScript(), output.RedeemScript,
+				secondLevelScript.PkScript(),
+				packet.UnsignedTx.TxOut[outputIndex].PkScript,
 			)
 
 			if !scriptMatches {
@@ -1587,6 +1608,88 @@ func (r *Validator) GetFeatures() string {
 // This metadata may be used during a future ValidatePSBT call.
 func (r *Validator) AddMetadata(_ []byte) error {
 	return nil
+}
+
+func (r *Validator) isAddressInternal(key *hdkeychain.ExtendedKey,
+	accountPath []uint32, keysToCheck uint32,
+	matchAddressPkScript []byte) (bool, error) {
+
+	var currentKey = key
+	for idx, pathPart := range accountPath {
+		derivedKey, err := currentKey.DeriveNonStandard(pathPart)
+		if err != nil {
+			return false, err
+		}
+
+		// There's this special case in lnd's wallet (btcwallet) where
+		// the coin type and account keys are always serialized as a
+		// string and encrypted, which actually fixes the key padding
+		// issue that makes the difference between DeriveNonStandard and
+		// Derive. To replicate lnd's behavior exactly, we need to
+		// serialize and de-serialize the extended key at the coin type
+		// and account level (depth = 2 or depth = 3). This does not
+		// apply to the default account (id = 0) because that is always
+		// derived directly.
+		depth := derivedKey.Depth()
+		keyID := pathPart - hdkeychain.HardenedKeyStart
+		nextID := uint32(0)
+		if depth == 2 && len(accountPath) > 2 {
+			nextID = accountPath[idx+1] - hdkeychain.HardenedKeyStart
+		}
+		if (depth == 2 && nextID != 0) || (depth == 3 && keyID != 0) {
+			currentKey, err = hdkeychain.NewKeyFromString(
+				derivedKey.String(),
+			)
+			if err != nil {
+				return false, err
+			}
+		} else {
+			currentKey = derivedKey
+		}
+	}
+
+	for i := uint32(0); i < keysToCheck; i++ {
+		addrKey, err := currentKey.DeriveNonStandard(i)
+		if err != nil {
+			return false, err
+		}
+
+		addrPubKey, err := addrKey.ECPubKey()
+		if err != nil {
+			return false, err
+		}
+
+		pubKeyHash := btcutil.Hash160(addrPubKey.SerializeCompressed())
+		witnessAddr, err := btcutil.NewAddressWitnessPubKeyHash(
+			pubKeyHash, r.network,
+		)
+		if err != nil {
+			return false, err
+		}
+
+		witnessProgram, err := txscript.PayToAddrScript(witnessAddr)
+		if err != nil {
+			return false, err
+		}
+
+		np2wkhAddr, err := btcutil.NewAddressScriptHash(
+			witnessProgram, r.network,
+		)
+		if err != nil {
+			return false, err
+		}
+
+		pkScript, err := txscript.PayToAddrScript(np2wkhAddr)
+		if err != nil {
+			return false, err
+		}
+
+		if bytes.Equal(pkScript, matchAddressPkScript) {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 // A compile time assertion to ensure Validator meets the Validation interface.

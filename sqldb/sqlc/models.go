@@ -9,6 +9,13 @@ import (
 	"time"
 )
 
+type AddressWhitelist struct {
+	ID         int64
+	Address    string
+	AmountMsat int64
+	CreatedAt  time.Time
+}
+
 type AmpSubInvoice struct {
 	SetID       []byte
 	State       int16
@@ -90,4 +97,11 @@ type InvoiceHtlcCustomRecord struct {
 type InvoiceSequence struct {
 	Name         string
 	CurrentValue int64
+}
+
+type PaymentHashWhitelist struct {
+	ID          int64
+	PaymentHash []byte
+	AmountMsat  int64
+	CreatedAt   time.Time
 }

@@ -673,7 +673,9 @@ func Main(cfg *Config, lisCfg ListenerCfg, implCfg *ImplementationCfg,
 	// starts.
 	rscBuilder := rpcwallet.NewRemoteSignerClientBuilder(cfg.WatchOnlyNode)
 
-	rsClient, err := rscBuilder.Build(rpcServer.subServers)
+	rsClient, err := rscBuilder.Build(
+		rpcServer.subServers, cfg.ActiveNetParams.Params,
+	)
 	if err != nil {
 		return mkErr("unable to create remote signer client", err)
 	}

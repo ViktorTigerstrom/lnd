@@ -1,0 +1,303 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "remotesignerrpc/remotesigner.proto",
+    "version": "version not set"
+  },
+  "tags": [
+    {
+      "name": "RemoteSigner"
+    }
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/v2/remotesigner/addresswhitelist": {
+      "get": {
+        "summary": "lncli: `whitelistedaddresses`\nWhitelistedAddresses lists the currently whitelisted addresses.",
+        "operationId": "RemoteSigner_WhitelistedAddresses",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/remotesignerrpcWhitelistedAddressesResp"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "RemoteSigner"
+        ]
+      },
+      "post": {
+        "summary": "lncli: `whitelistaddress`\nWhitelistAddress adds an address to the whitelist. If the address is\nalready whitelisted, this call will fail.",
+        "operationId": "RemoteSigner_WhitelistAddress",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/remotesignerrpcWhitelistAddressResp"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/remotesignerrpcWhitelistAddressRequest"
+            }
+          }
+        ],
+        "tags": [
+          "RemoteSigner"
+        ]
+      }
+    },
+    "/v2/remotesigner/addresswhitelist/{address}": {
+      "delete": {
+        "summary": "lncli: `removewhitelistedaddress`\nRemoveWhitelistedAddress removes an address from the whitelist.",
+        "operationId": "RemoteSigner_RemoveWhitelistedAddress",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/remotesignerrpcRemoveWhitelistAddressResp"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "address",
+            "description": "Address to remove from the whitelist.",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "RemoteSigner"
+        ]
+      }
+    },
+    "/v2/remotesigner/paymenthashwhitelist": {
+      "get": {
+        "summary": "lncli: `whitelistedpaymenthashes`\nWhitelistedPaymentHashes lists the currently whitelisted payment hashes.",
+        "operationId": "RemoteSigner_WhitelistedPaymentHashes",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/remotesignerrpcWhitelistedPaymentHashesResp"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "RemoteSigner"
+        ]
+      },
+      "post": {
+        "summary": "lncli: `whitelistpaymenthash`\nWhitelistPaymentHash adds an payment hash to the whitelist. If the payment\nhash is already whitelisted, this call will fail.",
+        "operationId": "RemoteSigner_WhitelistPaymentHash",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/remotesignerrpcWhitelistPaymentHashResp"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/remotesignerrpcWhitelistPaymentHashRequest"
+            }
+          }
+        ],
+        "tags": [
+          "RemoteSigner"
+        ]
+      }
+    },
+    "/v2/remotesigner/paymenthashwhitelist/{payment_hash}": {
+      "delete": {
+        "summary": "lncli: `removewhitelistedpaymenthash`\nRemoveWhitelistedPaymentHash removes a payment hash from the whitelist.",
+        "operationId": "RemoteSigner_RemoveWhitelistedPaymentHash",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/remotesignerrpcRemoveWhitelistPaymentHashResp"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "payment_hash",
+            "description": "Payment hash to remove from the whitelist.",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "byte"
+          }
+        ],
+        "tags": [
+          "RemoteSigner"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "type_url": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string",
+          "format": "byte"
+        }
+      }
+    },
+    "remotesignerrpcRemoveWhitelistAddressResp": {
+      "type": "object",
+      "properties": {
+        "removed": {
+          "type": "boolean",
+          "description": "The returned bool is True if the address was removed from the whitelist."
+        }
+      }
+    },
+    "remotesignerrpcRemoveWhitelistPaymentHashResp": {
+      "type": "object",
+      "properties": {
+        "removed": {
+          "type": "boolean",
+          "description": "The returned bool is True if the payment hash was removed from the\nwhitelist."
+        }
+      }
+    },
+    "remotesignerrpcWhitelistAddressRequest": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": "string",
+          "description": "Address to add to the whitelist."
+        },
+        "amount": {
+          "type": "string",
+          "format": "int64",
+          "description": "The amount to whitelist for the address."
+        }
+      }
+    },
+    "remotesignerrpcWhitelistAddressResp": {
+      "type": "object"
+    },
+    "remotesignerrpcWhitelistPaymentHashRequest": {
+      "type": "object",
+      "properties": {
+        "payment_hash": {
+          "type": "string",
+          "format": "byte",
+          "description": "Payment hash to add to the whitelist."
+        },
+        "amount": {
+          "type": "string",
+          "format": "int64",
+          "description": "The amount to whitelist for the payment hash."
+        }
+      }
+    },
+    "remotesignerrpcWhitelistPaymentHashResp": {
+      "type": "object"
+    },
+    "remotesignerrpcWhitelistedAddressesResp": {
+      "type": "object",
+      "properties": {
+        "addresses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "List of whitelisted addresses."
+        }
+      }
+    },
+    "remotesignerrpcWhitelistedPaymentHashesResp": {
+      "type": "object",
+      "properties": {
+        "payment_hashes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "byte"
+          },
+          "description": "List of whitelisted payment hashes."
+        }
+      }
+    },
+    "rpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    }
+  }
+}

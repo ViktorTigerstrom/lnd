@@ -2,8 +2,33 @@ package validator
 
 import (
 	"context"
+
 	"github.com/lightningnetwork/lnd/lnrpc/walletrpc"
 )
+
+type RemoteSignerDB interface {
+	InsertWhitelistedAddress(ctx context.Context, address string,
+		amount int64) error
+
+	GetWhitelistedAddress(ctx context.Context,
+		address string) (string, error)
+
+	ListWhitelistedAddresses(ctx context.Context) ([]string, error)
+
+	DeleteWhitelistedAddress(ctx context.Context,
+		address string) (bool, error)
+
+	InsertWhitelistedPaymentHash(ctx context.Context, paymentHash []byte,
+		amount int64) error
+
+	GetWhitelistedPaymentHash(ctx context.Context,
+		paymentHash []byte) ([]byte, error)
+
+	ListWhitelistedPaymentHashes(ctx context.Context) ([][]byte, error)
+
+	DeleteWhitelistedPaymentHash(ctx context.Context,
+		paymentHash []byte) (bool, error)
+}
 
 // Validation is an interface that abstracts the logic for implementing
 // remote signing validation.

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/btcsuite/btcd/chaincfg"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -325,7 +326,8 @@ type OutboundClient struct {
 func NewOutboundClient(walletServer walletrpc.WalletKitServer,
 	signerServer signrpc.SignerServer,
 	streamFeeder SignCoordinatorStreamFeeder,
-	requestTimeout time.Duration) (*OutboundClient, error) {
+	requestTimeout time.Duration,
+	network *chaincfg.Params) (*OutboundClient, error) {
 
 	if walletServer == nil || signerServer == nil {
 		return nil, errors.New("sub-servers cannot be nil when using " +
@@ -346,7 +348,7 @@ func NewOutboundClient(walletServer walletrpc.WalletKitServer,
 		maxRetryTimeout: defaultMaxRetryTimeout,
 		cg:              fn.NewContextGuard(),
 		gManager:        fn.NewGoroutineManager(),
-		validator:       validator.NewValidator(),
+		validator:       validator.NewValidator(network),
 	}, nil
 }
 

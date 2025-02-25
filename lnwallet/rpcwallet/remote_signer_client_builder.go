@@ -1,6 +1,7 @@
 package rpcwallet
 
 import (
+	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/lightningnetwork/lnd/lncfg"
 	"github.com/lightningnetwork/lnd/lnrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/signrpc"
@@ -24,8 +25,8 @@ func NewRemoteSignerClientBuilder(cfg *lncfg.WatchOnlyNode) *rscBuilder {
 // Build creates a new RemoteSignerClient instance. If the configuration enables
 // an outbound remote signer, a new OutboundRemoteSignerClient will be returned.
 // Else, a NoOpClient will be returned.
-func (b *rscBuilder) Build(subServers []lnrpc.SubServer) (
-	RemoteSignerClient, error) {
+func (b *rscBuilder) Build(subServers []lnrpc.SubServer,
+	network *chaincfg.Params) (RemoteSignerClient, error) {
 
 	var (
 		walletServer walletrpc.WalletKitServer
@@ -65,5 +66,6 @@ func (b *rscBuilder) Build(subServers []lnrpc.SubServer) (
 
 	return NewOutboundClient(
 		walletServer, signerServer, streamFeeder, b.cfg.RequestTimeout,
+		network,
 	)
 }
