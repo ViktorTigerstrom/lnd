@@ -780,6 +780,11 @@ type LightningChannel struct {
 	// way contracts are resolved.
 	auxResolver fn.Option[AuxContractResolver]
 
+	// remoteSignerInformer is an optional component that can be used to
+	// inform the remote signer about the channel state for informational
+	// purposes only.
+	rsInformer fn.Option[RemoteSignerInformer]
+
 	// Capacity is the total capacity of this channel.
 	Capacity btcutil.Amount
 
@@ -843,8 +848,17 @@ type channelOpts struct {
 	leafStore   fn.Option[AuxLeafStore]
 	auxSigner   fn.Option[AuxSigner]
 	auxResolver fn.Option[AuxContractResolver]
+	rsInformer  fn.Option[RemoteSignerInformer]
 
 	skipNonceInit bool
+}
+
+// WithLocalMusigNonces is used to bind an existing verification/local nonce to
+// a new channel.
+func WithRemoteSignerInformer(rsInformer RemoteSignerInformer) ChannelOpt {
+	return func(o *channelOpts) {
+		o.rsInformer = fn.Some[RemoteSignerInformer](rsInformer)
+	}
 }
 
 // WithLocalMusigNonces is used to bind an existing verification/local nonce to
@@ -950,6 +964,7 @@ func NewLightningChannel(signer input.Signer,
 		leafStore:     opts.leafStore,
 		auxSigner:     opts.auxSigner,
 		auxResolver:   opts.auxResolver,
+		rsInformer:    opts.rsInformer,
 		sigPool:       sigPool,
 		currentHeight: localCommit.CommitHeight,
 		commitChains:  commitChains,
@@ -5434,6 +5449,29 @@ func (lc *LightningChannel) ReceiveNewCommitment(commitSigs *CommitSigs) error {
 	}
 
 	lc.commitChains.Local.addCommitment(localCommitmentView)
+
+	// If we're using a remote signer that needs information about the
+	// current local commitment transaction, we also forward the local
+	// commitment transaction to the remote signer.
+	lc.rsInformer.WhenSome(func(rsInformer RemoteSignerInformer) {
+		// Ensure that we're passing the correct derivation info to the
+		// signer. Since the SignDescriptor is created when the channel
+		// object is initialized, and reused with every update, we clean
+		// up after ourselves when we're finished signing.
+		lc.signDesc.OutSignInfo = localCommitmentView.signInfo
+		defer func() { lc.signDesc.OutSignInfo = []input.SignInfo{} }()
+
+		lc.signDesc.TransactionType = input.UnknownOptions(
+			input.LocalCommitmentTransaction(),
+		)
+
+		err = rsInformer.ForwardLocalCommitment(
+			localCommitmentView.txn, lc.signDesc,
+		)
+	})
+	if err != nil {
+		return err
+	}
 
 	return nil
 }

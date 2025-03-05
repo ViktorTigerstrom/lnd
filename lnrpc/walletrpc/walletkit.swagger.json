@@ -2459,6 +2459,10 @@
         "sign_psbt_request": {
           "$ref": "#/definitions/walletrpcSignPsbtRequest",
           "description": "Requests that the remote signer signs the passed PSBT."
+        },
+        "local_commitment_info": {
+          "$ref": "#/definitions/walletrpcSignPsbtRequest",
+          "description": "Informs the remote signer of the current local commitment transaction.\nNote: This is not a request to the remote signer to sign the local\ncommitment, it is strictly only used for informing remote signer about\nthe latest local commitment transaction."
         }
       }
     },

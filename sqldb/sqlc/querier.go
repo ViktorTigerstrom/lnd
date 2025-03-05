@@ -12,6 +12,7 @@ import (
 type Querier interface {
 	DeleteCanceledInvoices(ctx context.Context) (sql.Result, error)
 	DeleteInvoice(ctx context.Context, arg DeleteInvoiceParams) (sql.Result, error)
+	DeleteLocalCommitment(ctx context.Context, arg DeleteLocalCommitmentParams) (sql.Result, error)
 	DeleteWhitelistedAddress(ctx context.Context, address string) (sql.Result, error)
 	DeleteWhitelistedPaymentHash(ctx context.Context, paymentHash []byte) (sql.Result, error)
 	FetchAMPSubInvoiceHTLCs(ctx context.Context, arg FetchAMPSubInvoiceHTLCsParams) ([]FetchAMPSubInvoiceHTLCsRow, error)
@@ -27,6 +28,7 @@ type Querier interface {
 	GetInvoiceFeatures(ctx context.Context, invoiceID int64) ([]InvoiceFeature, error)
 	GetInvoiceHTLCCustomRecords(ctx context.Context, invoiceID int64) ([]GetInvoiceHTLCCustomRecordsRow, error)
 	GetInvoiceHTLCs(ctx context.Context, invoiceID int64) ([]InvoiceHtlc, error)
+	GetLatestLocalCommitment(ctx context.Context, arg GetLatestLocalCommitmentParams) (LocalCommitment, error)
 	GetWhitelistedAddress(ctx context.Context, address string) (AddressWhitelist, error)
 	GetWhitelistedPaymentHash(ctx context.Context, paymentHash []byte) (PaymentHashWhitelist, error)
 	InsertAMPSubInvoiceHTLC(ctx context.Context, arg InsertAMPSubInvoiceHTLCParams) error
@@ -34,6 +36,7 @@ type Querier interface {
 	InsertInvoiceFeature(ctx context.Context, arg InsertInvoiceFeatureParams) error
 	InsertInvoiceHTLC(ctx context.Context, arg InsertInvoiceHTLCParams) (int64, error)
 	InsertInvoiceHTLCCustomRecord(ctx context.Context, arg InsertInvoiceHTLCCustomRecordParams) error
+	InsertLocalCommitment(ctx context.Context, arg InsertLocalCommitmentParams) (int64, error)
 	InsertWhitelistedAddress(ctx context.Context, arg InsertWhitelistedAddressParams) (int64, error)
 	InsertWhitelistedPaymentHash(ctx context.Context, arg InsertWhitelistedPaymentHashParams) (int64, error)
 	ListWhitelistedAddresses(ctx context.Context) ([]AddressWhitelist, error)

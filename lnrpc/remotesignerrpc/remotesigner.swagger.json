@@ -18,7 +18,7 @@
   "paths": {
     "/v2/remotesigner/addresswhitelist": {
       "get": {
-        "summary": "lncli: `whitelistedaddresses`\nWhitelistedAddresses lists the currently whitelisted addresses.",
+        "summary": "lncli: `listwhitelistedaddresses`\nWhitelistedAddresses lists the currently whitelisted addresses.",
         "operationId": "RemoteSigner_WhitelistedAddresses",
         "responses": {
           "200": {
@@ -104,7 +104,7 @@
     },
     "/v2/remotesigner/paymenthashwhitelist": {
       "get": {
-        "summary": "lncli: `whitelistedpaymenthashes`\nWhitelistedPaymentHashes lists the currently whitelisted payment hashes.",
+        "summary": "lncli: `listwhitelistedpaymenthashes`\nWhitelistedPaymentHashes lists the currently whitelisted payment hashes.",
         "operationId": "RemoteSigner_WhitelistedPaymentHashes",
         "responses": {
           "200": {

@@ -84,54 +84,6 @@ func getRemoteSignerClient(ctx *cli.Context) (
 	return remotesignerrpc.NewRemoteSignerClient(conn), cleanUp
 }
 
-/*
-func parseBlindedPathCfg(ctx *cli.Context) (*lnrpc.BlindedPathConfig, error) {
-	if !ctx.Bool("blind") {
-		if ctx.IsSet("min_real_blinded_hops") ||
-			ctx.IsSet("num_blinded_hops") ||
-			ctx.IsSet("max_blinded_paths") ||
-			ctx.IsSet("blinded_path_omit_node") {
-
-			return nil, fmt.Errorf("blinded path options are " +
-				"only used if the `--blind` options is set")
-		}
-
-		return nil, nil
-	}
-
-	var blindCfg lnrpc.BlindedPathConfig
-
-	if ctx.IsSet("min_real_blinded_hops") {
-		minNumRealHops := uint32(ctx.Uint("min_real_blinded_hops"))
-		blindCfg.MinNumRealHops = &minNumRealHops
-	}
-
-	if ctx.IsSet("num_blinded_hops") {
-		numHops := uint32(ctx.Uint("num_blinded_hops"))
-		blindCfg.NumHops = &numHops
-	}
-
-	if ctx.IsSet("max_blinded_paths") {
-		maxPaths := uint32(ctx.Uint("max_blinded_paths"))
-		blindCfg.MaxNumPaths = &maxPaths
-	}
-
-	for _, pubKey := range ctx.StringSlice("blinded_path_omit_node") {
-		pubKeyBytes, err := hex.DecodeString(pubKey)
-		if err != nil {
-			return nil, err
-		}
-
-		blindCfg.NodeOmissionList = append(
-			blindCfg.NodeOmissionList, pubKeyBytes,
-		)
-	}
-
-	return &blindCfg, nil
-}
-
-*/
-
 var listWhitelistedAddressesCommand = cli.Command{
 	Name:     "listwhitelistedaddresses",
 	Category: "RemoteSigner",
@@ -307,7 +259,7 @@ var removeWhitelistedPaymentHashCommand = cli.Command{
 				"remove from the whitelist",
 		},
 	},
-	Action: actionDecorator(lookupInvoice),
+	Action: actionDecorator(removeWhitelistedPaymentHash),
 }
 
 func removeWhitelistedPaymentHash(ctx *cli.Context) error {

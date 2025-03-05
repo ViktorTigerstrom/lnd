@@ -1,4 +1,5 @@
-// TODO: Should add remotesigner build tags for this file
+//go:build remotesignerrpc
+// +build remotesignerrpc
 
 package remotesignerrpc
 

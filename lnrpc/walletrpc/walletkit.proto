@@ -435,6 +435,14 @@ message SignCoordinatorRequest {
         Requests that the remote signer signs the passed PSBT.
         */
         SignPsbtRequest sign_psbt_request = 11;
+
+        /*
+        Informs the remote signer of the current local commitment transaction.
+        Note: This is not a request to the remote signer to sign the local
+        commitment, it is strictly only used for informing remote signer about
+        the latest local commitment transaction.
+        */
+        SignPsbtRequest local_commitment_info = 12;
     }
 }
 
@@ -513,6 +521,13 @@ message SignCoordinatorResponse {
         will respond with a SignerError message that details the error.
         */
         SignerError signer_error = 12;
+
+        /*
+        The remote signer's corresponding response to a Local Commitment Info
+        request, to signal that the remote signer has received the local
+        commitment info.
+        */
+        bool local_commitment_info_response = 13;
     }
 }
 

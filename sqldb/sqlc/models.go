@@ -99,6 +99,15 @@ type InvoiceSequence struct {
 	CurrentValue int64
 }
 
+type LocalCommitment struct {
+	ID                  int64
+	CommitmentTxPackage []byte
+	FundingTxid         []byte
+	FundingOutputIndex  int32
+	CommitmentHeight    int64
+	CreatedAt           time.Time
+}
+
 type PaymentHashWhitelist struct {
 	ID          int64
 	PaymentHash []byte

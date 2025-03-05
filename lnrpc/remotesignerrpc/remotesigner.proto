@@ -32,7 +32,7 @@ service RemoteSigner {
     rpc WhitelistAddress (WhitelistAddressRequest)
         returns (WhitelistAddressResp);
 
-    /* lncli: `whitelistedaddresses`
+    /* lncli: `listwhitelistedaddresses`
     WhitelistedAddresses lists the currently whitelisted addresses.
     */
     rpc WhitelistedAddresses (WhitelistedAddressesRequest)
@@ -51,7 +51,7 @@ service RemoteSigner {
     rpc WhitelistPaymentHash (WhitelistPaymentHashRequest)
         returns (WhitelistPaymentHashResp);
 
-    /* lncli: `whitelistedpaymenthashes`
+    /* lncli: `listwhitelistedpaymenthashes`
     WhitelistedPaymentHashes lists the currently whitelisted payment hashes.
     */
     rpc WhitelistedPaymentHashes (WhitelistedPaymentHashesRequest)

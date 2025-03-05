@@ -2,6 +2,8 @@ package lnd
 
 import (
 	"fmt"
+	"github.com/lightningnetwork/lnd/lnrpc/remotesignerrpc"
+	"github.com/lightningnetwork/lnd/lnwallet/validator"
 	"net"
 	"reflect"
 
@@ -96,6 +98,11 @@ type subRPCServerConfigs struct {
 	// developers manipulate LND state that is normally not possible.
 	// Should only be used for development purposes.
 	DevRPC *devrpc.Config `group:"devrpc" namespace:"devrpc"`
+
+	// RemoteSignerRPC is a sub-RPC server that exposes functionality
+	// allowing a user to whitelist addresses and payment hashes for remote
+	// signing validation.
+	RemoteSignerRPC *remotesignerrpc.Config `group:"remotesignerrpc" namespace:"remotesignerrpc"`
 }
 
 // PopulateDependencies attempts to iterate through all the sub-server configs
@@ -116,6 +123,7 @@ func (s *subRPCServerConfigs) PopulateDependencies(cfg *Config,
 	nodeSigner *netann.NodeSigner,
 	graphDB *graphdb.ChannelGraph,
 	chanStateDB *channeldb.ChannelStateDB,
+	remoteSignerDB validator.RemoteSignerDB,
 	sweeper *sweep.UtxoSweeper,
 	tower *watchtower.Standalone,
 	towerClientMgr *wtclient.Manager,
@@ -216,6 +224,19 @@ func (s *subRPCServerConfigs) PopulateDependencies(cfg *Config,
 			// added through the PopulateRemoteSignerCfgValues
 			// function, and we therefore don't need to overwrite
 			// them here.
+
+		case *remotesignerrpc.Config:
+			subCfgValue := extractReflectValue(subCfg)
+
+			subCfgValue.FieldByName("NetworkDir").Set(
+				reflect.ValueOf(networkDir),
+			)
+			subCfgValue.FieldByName("MacService").Set(
+				reflect.ValueOf(macService),
+			)
+			subCfgValue.FieldByName("RemoteSignerDB").Set(
+				reflect.ValueOf(remoteSignerDB),
+			)
 
 		case *autopilotrpc.Config:
 			subCfgValue := extractReflectValue(subCfg)

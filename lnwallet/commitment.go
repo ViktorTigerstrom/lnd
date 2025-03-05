@@ -435,7 +435,7 @@ func SecondLevelHtlcScript(chanType channeldb.ChannelType, initiator bool,
 	csvDelay, leaseExpiry uint32, fundingOutpoint wire.OutPoint,
 	auxLeaf input.AuxTapLeaf) (input.ScriptDescriptor, error) {
 
-	fundingPointUnkown, err := input.FundingOutpoint(fundingOutpoint)
+	fundingPointUnknown, err := input.FundingOutpoint(fundingOutpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -446,7 +446,7 @@ func SecondLevelHtlcScript(chanType channeldb.ChannelType, initiator bool,
 		input.CommitPoint(commitPoint),
 		input.CsvDelay(csvDelay),
 		input.LeaseExpiry(leaseExpiry),
-		fundingPointUnkown,
+		fundingPointUnknown,
 	)
 
 	switch {

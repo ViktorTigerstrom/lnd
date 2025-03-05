@@ -34,6 +34,16 @@ type SQLRemoteSignerQueries interface { //nolint:interfacebloat
 
 	InsertWhitelistedPaymentHash(ctx context.Context,
 		arg sqlc.InsertWhitelistedPaymentHashParams) (int64, error)
+
+	InsertLocalCommitment(ctx context.Context,
+		arg sqlc.InsertLocalCommitmentParams) (int64, error)
+
+	GetLatestLocalCommitment(ctx context.Context,
+		arg sqlc.GetLatestLocalCommitmentParams) (sqlc.LocalCommitment,
+		error)
+
+	DeleteLocalCommitment(ctx context.Context,
+		arg sqlc.DeleteLocalCommitmentParams) (sql.Result, error)
 }
 
 var _ RemoteSignerDB = (*RemoteSignerSQLStore)(nil)
@@ -164,9 +174,10 @@ func (s *RemoteSignerSQLStore) InsertWhitelistedPaymentHash(ctx context.Context,
 // GetWhitelistedPaymentHash retrieves a whitelisted payment hash from the
 // database.
 func (s *RemoteSignerSQLStore) GetWhitelistedPaymentHash(ctx context.Context,
-	paymentHash []byte) ([]byte, error) {
+	paymentHash [32]byte) ([]byte, error) {
 
-	res, err := s.db.GetWhitelistedPaymentHash(ctx, paymentHash)
+	// TODO: Make the sql db use a [32]byte type instead.
+	res, err := s.db.GetWhitelistedPaymentHash(ctx, paymentHash[:])
 	if err != nil {
 		return nil, err
 	}
@@ -198,6 +209,81 @@ func (s *RemoteSignerSQLStore) DeleteWhitelistedPaymentHash(ctx context.Context,
 	paymentHash []byte) (bool, error) {
 
 	res, err := s.db.DeleteWhitelistedPaymentHash(ctx, paymentHash)
+	if err != nil {
+		return false, err
+	}
+
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+
+	return rows > 0, nil
+}
+
+func (s *RemoteSignerSQLStore) InsertLocalCommitment(ctx context.Context,
+	commitmentTxPackage []byte, fundingTxid []byte,
+	fundingOutputIndex uint32, commitmentHeight uint64) error {
+
+	//TODO: ensure fundingOutputIndex is not above int32 max value
+	//TODO: ensure commitmentHeight is not above int64 max value
+
+	_, err := s.db.InsertLocalCommitment(ctx,
+		sqlc.InsertLocalCommitmentParams{
+			CommitmentTxPackage: commitmentTxPackage,
+			FundingTxid:         fundingTxid,
+			FundingOutputIndex:  int32(fundingOutputIndex),
+			CommitmentHeight:    int64(commitmentHeight),
+			CreatedAt:           s.clock.Now(),
+		},
+	)
+
+	return err
+}
+
+func (s *RemoteSignerSQLStore) GetLatestLocalCommitment(ctx context.Context,
+	fundingTxid []byte,
+	fundingOutputIndex uint32) (LocalCommitmentInfo, error) {
+
+	//TODO: ensure fundingOutputIndex is not above int32 max value
+
+	res, err := s.db.GetLatestLocalCommitment(ctx,
+		sqlc.GetLatestLocalCommitmentParams{
+			FundingTxid:        fundingTxid,
+			FundingOutputIndex: int32(fundingOutputIndex),
+		},
+	)
+	if err != nil {
+		return LocalCommitmentInfo{}, err
+	}
+
+	// TODO: ensure res.FundingOutputIndex & res.CommitmentHeight is not
+	// negative values.
+
+	LocalCommitmentInfo := LocalCommitmentInfo{
+		CommitmentTxPackage: res.CommitmentTxPackage,
+		FundingTxid:         res.FundingTxid,
+		FundingOutputIndex:  uint32(res.FundingOutputIndex),
+		CommitmentHeight:    uint64(res.CommitmentHeight),
+	}
+
+	return LocalCommitmentInfo, nil
+}
+
+func (s *RemoteSignerSQLStore) DeleteLocalCommitment(ctx context.Context,
+	fundingTxid []byte, fundingOutputIndex uint32,
+	commitmentHeight uint64) (bool, error) {
+
+	//TODO: ensure fundingOutputIndex is not above int32 max value
+	//TODO: ensure commitmentHeight is not above int64 max value
+
+	res, err := s.db.DeleteLocalCommitment(ctx,
+		sqlc.DeleteLocalCommitmentParams{
+			FundingTxid:        fundingTxid,
+			FundingOutputIndex: int32(fundingOutputIndex),
+			CommitmentHeight:   int64(commitmentHeight),
+		},
+	)
 	if err != nil {
 		return false, err
 	}

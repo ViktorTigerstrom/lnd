@@ -1,3 +1,6 @@
+//go:build remotesignerrpc
+// +build remotesignerrpc
+
 package remotesignerrpc
 
 import (

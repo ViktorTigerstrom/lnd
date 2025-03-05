@@ -19,9 +19,13 @@ const (
 	// transaction.
 	FundingTransaction
 
-	// SecondLevelHTLCTransaction signals that the transaction is a second
+	// LocalSecondLevelHTLCTransaction signals that the transaction is a
+	// local second level HTLC transaction.
+	LocalSecondLevelHTLCTransaction
+
+	// RemoteLevelHTLCTransaction signals that the transaction is a second
 	// level HTLC transaction.
-	SecondLevelHTLCTransaction
+	RemoteSecondLevelHTLCTransaction
 
 	// Unknown signals that the transaction type in unknown
 	Unknown
@@ -38,7 +42,7 @@ func (t TransactionType) String() string {
 		return "cooperative_close"
 	case FundingTransaction:
 		return "funding_transaction"
-	case SecondLevelHTLCTransaction:
+	case LocalSecondLevelHTLCTransaction:
 		return "second_level_htlc_transaction"
 	default:
 		return "unknown"

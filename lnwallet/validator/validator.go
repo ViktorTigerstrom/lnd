@@ -5,14 +5,22 @@ package validator
 
 import (
 	"context"
+	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/lightningnetwork/lnd/lncfg"
 	"github.com/lightningnetwork/lnd/lnrpc/walletrpc"
 )
 
 // Validator is currently a no-op validator that runs in the production env.
 type Validator struct{}
 
+func ValidateCompatibleConfig(dbCfg *lncfg.DB) error {
+	return nil
+}
+
 // NewValidator creates a new Validator instance.
-func NewValidator() *Validator {
+func NewValidator(remoteSignerDB RemoteSignerDB,
+	network *chaincfg.Params) *Validator {
+
 	return &Validator{}
 }
 
@@ -33,7 +41,7 @@ func (r *Validator) GetFeatures() string {
 
 // AddMetadata allows metadata to be passed to the Validator.
 // This metadata may be used during a future ValidatePSBT call.
-func (r *Validator) AddMetadata(_ []byte) error {
+func (r *Validator) AddMetadata(ctx context.Context, metadata []byte) error {
 	return nil
 }
 

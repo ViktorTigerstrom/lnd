@@ -2,7 +2,7 @@ package input
 
 import (
 	"encoding/binary"
-	"encoding/hex"
+	"fmt"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/lightningnetwork/lnd/lntypes"
 
@@ -95,6 +95,14 @@ func uint64Bytes(num uint64) []byte {
 	return msgBytes[:]
 }
 
+func BytesToUint64(b []byte) (uint64, error) {
+	if len(b) != 8 {
+		return 0, fmt.Errorf("invalid byte slice length: expected 8, "+
+			"got %d", len(b))
+	}
+	return binary.LittleEndian.Uint64(b), nil
+}
+
 // uint64Bytes returns a byte slice for the little endian representation of the
 // argument.
 func uint32Bytes(num uint32) []byte {
@@ -105,6 +113,14 @@ func uint32Bytes(num uint32) []byte {
 	return msgBytes[:]
 }
 
+func BytesToUint32(b []byte) (uint32, error) {
+	if len(b) != 4 {
+		return 0, fmt.Errorf("invalid byte slice length: expected 4, "+
+			"got %d", len(b))
+	}
+	return binary.LittleEndian.Uint32(b), nil
+}
+
 // boolBytes returns a single-byte slice with a 0 for false and 1 for true.
 func boolBytes(val bool) []byte {
 	if val {
@@ -112,6 +128,23 @@ func boolBytes(val bool) []byte {
 	}
 
 	return []byte{0}
+}
+
+func BytesToBool(b []byte) (bool, error) {
+	if len(b) != 1 {
+		return false, fmt.Errorf("invalid byte slice length: "+
+			"expected 1, got %d", len(b))
+	}
+
+	switch b[0] {
+	case 1:
+		return true, nil
+	case 0:
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid byte value: "+
+			"expected 0 or 1, got %d", b[0])
+	}
 }
 
 // descBytes returns a byte slice representing the descriptor (family/index
@@ -184,10 +217,12 @@ func CommitPoint(point *btcec.PublicKey) UnknownOption {
 
 // FundingOutpoint returns an UnknownOption for the funding outpoint.
 func FundingOutpoint(fundingOutpoint wire.OutPoint) (UnknownOption, error) {
-	fundingOutpointBytes, err := fundingOutpointToBytes(fundingOutpoint)
+	/*fundingOutpointBytes, err := fundingOutpointToBytes(fundingOutpoint)
 	if err != nil {
 		return nil, err
-	}
+	}*/
+
+	fundingOutpointBytes := []byte(fundingOutpoint.String())
 
 	return wrapUnknownOption(
 		PsbtKeyTypeOutputFundingPoint,
@@ -195,7 +230,8 @@ func FundingOutpoint(fundingOutpoint wire.OutPoint) (UnknownOption, error) {
 	), nil
 }
 
-// Convert FundingOutpoint to []byte
+/*
+// fundingOutpointToBytes converts an wire.OutPoint a 36-byte slice.
 func fundingOutpointToBytes(outpoint wire.OutPoint) ([]byte, error) {
 	// Decode the txid (hex string) to bytes
 	txidBytes, err := hex.DecodeString(outpoint.Hash.String())
@@ -217,6 +253,38 @@ func fundingOutpointToBytes(outpoint wire.OutPoint) ([]byte, error) {
 
 	return finalBytes, nil
 }
+
+// bytesToFundingOutpoint converts a 36-byte slice back to a wire.OutPoint.
+func bytesToFundingOutpoint(data []byte) (wire.OutPoint, error) {
+	// The expected length is 36 bytes: 32 for the txid and 4 for the index.
+	if len(data) != 36 {
+		return wire.OutPoint{}, errors.New("invalid data length; expected 36 bytes")
+	}
+
+	// Extract the txid bytes and reverse them.
+	txidBytes := make([]byte, 32)
+	copy(txidBytes, data[:32])
+	for i := 0; i < len(txidBytes)/2; i++ {
+		txidBytes[i], txidBytes[len(txidBytes)-1-i] = txidBytes[len(txidBytes)-1-i], txidBytes[i]
+	}
+
+	// Convert the txid bytes to a chainhash.Hash.
+	hash, err := chainhash.NewHash(txidBytes)
+	if err != nil {
+		return wire.OutPoint{}, err
+	}
+
+	// Extract the 4-byte index from the remaining bytes.
+	index := binary.LittleEndian.Uint32(data[32:36])
+
+	// Build the OutPoint.
+	outpoint := wire.OutPoint{
+		Hash:  *hash,
+		Index: index,
+	}
+
+	return outpoint, nil
+}*/
 
 // RHash returns an UnknownOption for the rHash.
 func RHash(rHash []byte) UnknownOption {

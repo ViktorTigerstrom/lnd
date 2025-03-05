@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/btcsuite/btcd/chaincfg"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -326,8 +325,8 @@ type OutboundClient struct {
 func NewOutboundClient(walletServer walletrpc.WalletKitServer,
 	signerServer signrpc.SignerServer,
 	streamFeeder SignCoordinatorStreamFeeder,
-	requestTimeout time.Duration,
-	network *chaincfg.Params) (*OutboundClient, error) {
+	rsValidator validator.Validation,
+	requestTimeout time.Duration) (*OutboundClient, error) {
 
 	if walletServer == nil || signerServer == nil {
 		return nil, errors.New("sub-servers cannot be nil when using " +
@@ -348,7 +347,7 @@ func NewOutboundClient(walletServer walletrpc.WalletKitServer,
 		maxRetryTimeout: defaultMaxRetryTimeout,
 		cg:              fn.NewContextGuard(),
 		gManager:        fn.NewGoroutineManager(),
-		validator:       validator.NewValidator(network),
+		validator:       rsValidator,
 	}, nil
 }
 
@@ -817,6 +816,22 @@ func (r *OutboundClient) process(ctx context.Context,
 
 		rType := &walletrpc.SignCoordinatorResponse_SignPsbtResponse{
 			SignPsbtResponse: resp,
+		}
+
+		signResp.SignResponseType = rType
+
+		return signResp, nil
+
+	case *walletrpc.SignCoordinatorRequest_LocalCommitmentInfo:
+		err := r.validator.AddMetadata(
+			ctx, reqType.LocalCommitmentInfo.GetFundedPsbt(),
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		rType := &walletrpc.SignCoordinatorResponse_LocalCommitmentInfoResponse{
+			LocalCommitmentInfoResponse: true,
 		}
 
 		signResp.SignResponseType = rType

@@ -15,6 +15,7 @@ run:
     - peersrpc
     - signrpc
     - walletrpc
+    - remotesignerrpc
     - watchtowerrpc
     - kvdb_etcd
     - kvdb_postgres

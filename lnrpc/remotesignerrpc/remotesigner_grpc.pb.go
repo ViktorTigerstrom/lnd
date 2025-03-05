@@ -22,7 +22,7 @@ type RemoteSignerClient interface {
 	// WhitelistAddress adds an address to the whitelist. If the address is
 	// already whitelisted, this call will fail.
 	WhitelistAddress(ctx context.Context, in *WhitelistAddressRequest, opts ...grpc.CallOption) (*WhitelistAddressResp, error)
-	// lncli: `whitelistedaddresses`
+	// lncli: `listwhitelistedaddresses`
 	// WhitelistedAddresses lists the currently whitelisted addresses.
 	WhitelistedAddresses(ctx context.Context, in *WhitelistedAddressesRequest, opts ...grpc.CallOption) (*WhitelistedAddressesResp, error)
 	// lncli: `removewhitelistedaddress`
@@ -32,7 +32,7 @@ type RemoteSignerClient interface {
 	// WhitelistPaymentHash adds an payment hash to the whitelist. If the payment
 	// hash is already whitelisted, this call will fail.
 	WhitelistPaymentHash(ctx context.Context, in *WhitelistPaymentHashRequest, opts ...grpc.CallOption) (*WhitelistPaymentHashResp, error)
-	// lncli: `whitelistedpaymenthashes`
+	// lncli: `listwhitelistedpaymenthashes`
 	// WhitelistedPaymentHashes lists the currently whitelisted payment hashes.
 	WhitelistedPaymentHashes(ctx context.Context, in *WhitelistedPaymentHashesRequest, opts ...grpc.CallOption) (*WhitelistedPaymentHashesResp, error)
 	// lncli: `removewhitelistedpaymenthash`
@@ -110,7 +110,7 @@ type RemoteSignerServer interface {
 	// WhitelistAddress adds an address to the whitelist. If the address is
 	// already whitelisted, this call will fail.
 	WhitelistAddress(context.Context, *WhitelistAddressRequest) (*WhitelistAddressResp, error)
-	// lncli: `whitelistedaddresses`
+	// lncli: `listwhitelistedaddresses`
 	// WhitelistedAddresses lists the currently whitelisted addresses.
 	WhitelistedAddresses(context.Context, *WhitelistedAddressesRequest) (*WhitelistedAddressesResp, error)
 	// lncli: `removewhitelistedaddress`
@@ -120,7 +120,7 @@ type RemoteSignerServer interface {
 	// WhitelistPaymentHash adds an payment hash to the whitelist. If the payment
 	// hash is already whitelisted, this call will fail.
 	WhitelistPaymentHash(context.Context, *WhitelistPaymentHashRequest) (*WhitelistPaymentHashResp, error)
-	// lncli: `whitelistedpaymenthashes`
+	// lncli: `listwhitelistedpaymenthashes`
 	// WhitelistedPaymentHashes lists the currently whitelisted payment hashes.
 	WhitelistedPaymentHashes(context.Context, *WhitelistedPaymentHashesRequest) (*WhitelistedPaymentHashesResp, error)
 	// lncli: `removewhitelistedpaymenthash`

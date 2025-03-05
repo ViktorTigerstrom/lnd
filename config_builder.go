@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/lightningnetwork/lnd/lnwallet/validator"
 	"net"
 	"os"
 	"path/filepath"
@@ -968,6 +969,10 @@ type DatabaseInstances struct {
 	// for native SQL queries for tables that already support it. This may
 	// be nil if the use-native-sql flag was not set.
 	NativeSQLStore *sqldb.BaseDB
+
+	// RemoteSignerDB is the database that stores information required for
+	// the remote signer validator, when lnd acts as a remote signer.
+	RemoteSignerDB validator.RemoteSignerDB
 }
 
 // DefaultDatabaseBuilder is a type that builds the default database backends
@@ -1151,6 +1156,30 @@ func (d *DefaultDatabaseBuilder) BuildDatabase(
 		)
 	} else {
 		dbs.InvoiceDB = dbs.ChanStateDB
+	}
+
+	// Instantiate the RemoteSignerDB
+	if d.cfg.DB.UseNativeSQL {
+		err = validator.ValidateCompatibleConfig(cfg.DB)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		executor := sqldb.NewTransactionExecutor(
+			dbs.NativeSQLStore,
+			func(tx *sql.Tx) validator.SQLRemoteSignerQueries {
+				return dbs.NativeSQLStore.WithTx(tx)
+			},
+		)
+
+		dbs.RemoteSignerDB = validator.NewRemoteSignerSQLStore(
+			executor, clock.NewDefaultClock(),
+		)
+	} else {
+		err = validator.ValidateCompatibleConfig(cfg.DB)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 
 	// Wrap the watchtower client DB and make sure we clean up.

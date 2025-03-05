@@ -5,6 +5,9 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"github.com/btcsuite/btcd/wire"
+	"github.com/lightningnetwork/lnd/input"
+	"github.com/lightningnetwork/lnd/lnwallet"
 	"os"
 	"time"
 
@@ -32,6 +35,8 @@ type RemoteSignerConnection interface {
 	// RemoteSignerRequests is an interface that defines the requests that
 	// can be sent to a remote signer.
 	RemoteSignerRequests
+
+	lnwallet.RemoteSignerInformer
 
 	// Timeout returns the set connection timeout for the remote signer.
 	Timeout() time.Duration
@@ -249,6 +254,17 @@ func (r *OutboundConnection) connect(ctx context.Context,
 	r.SignerClient = signrpc.NewSignerClient(conn)
 	r.WalletKitClient = walletrpc.NewWalletKitClient(conn)
 
+	return nil
+}
+
+// ForwardLocalCommitment sends the current local commitment transaction
+// to the remote signer strictly for informational purposes.
+//
+// Note: this is part of the RemoteSignerInformer interface.
+func (r *OutboundConnection) ForwardLocalCommitment(_ *wire.MsgTx,
+	_ *input.SignDescriptor) error {
+	// We never need to forward local commitment transactions when using an
+	// outbound connection.
 	return nil
 }
 

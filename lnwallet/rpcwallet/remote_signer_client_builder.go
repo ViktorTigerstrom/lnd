@@ -6,6 +6,7 @@ import (
 	"github.com/lightningnetwork/lnd/lnrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/signrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/walletrpc"
+	"github.com/lightningnetwork/lnd/lnwallet/validator"
 )
 
 type rscBuilder = RemoteSignerClientBuilder
@@ -26,6 +27,7 @@ func NewRemoteSignerClientBuilder(cfg *lncfg.WatchOnlyNode) *rscBuilder {
 // an outbound remote signer, a new OutboundRemoteSignerClient will be returned.
 // Else, a NoOpClient will be returned.
 func (b *rscBuilder) Build(subServers []lnrpc.SubServer,
+	remoteSignerDB validator.RemoteSignerDB,
 	network *chaincfg.Params) (RemoteSignerClient, error) {
 
 	var (
@@ -59,13 +61,26 @@ func (b *rscBuilder) Build(subServers []lnrpc.SubServer,
 		return &NoOpClient{}, nil
 	}
 
+	rsValidator := b.buildValidator(remoteSignerDB, network)
+
 	// An outbound remote signer client is enabled, therefore we create one.
 	log.Debugf("Using an outbound remote signer client")
 
 	streamFeeder := NewStreamFeeder(b.cfg.ConnectionCfg)
 
-	return NewOutboundClient(
-		walletServer, signerServer, streamFeeder, b.cfg.RequestTimeout,
-		network,
+	rsClient, err := NewOutboundClient(
+		walletServer, signerServer, streamFeeder, rsValidator,
+		b.cfg.RequestTimeout,
 	)
+	if err != nil {
+		return &NoOpClient{}, err
+	}
+
+	return rsClient, err
+}
+
+func (b *rscBuilder) buildValidator(remoteSignerDB validator.RemoteSignerDB,
+	network *chaincfg.Params) validator.Validation {
+
+	return validator.NewValidator(remoteSignerDB, network)
 }

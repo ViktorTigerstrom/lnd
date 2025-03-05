@@ -2,7 +2,6 @@ package validator
 
 import (
 	"context"
-
 	"github.com/lightningnetwork/lnd/lnrpc/walletrpc"
 )
 
@@ -22,12 +21,23 @@ type RemoteSignerDB interface {
 		amount int64) error
 
 	GetWhitelistedPaymentHash(ctx context.Context,
-		paymentHash []byte) ([]byte, error)
+		paymentHash [32]byte) ([]byte, error)
 
 	ListWhitelistedPaymentHashes(ctx context.Context) ([][]byte, error)
 
 	DeleteWhitelistedPaymentHash(ctx context.Context,
 		paymentHash []byte) (bool, error)
+
+	InsertLocalCommitment(ctx context.Context, commitmentTxPackage []byte,
+		fundingTxid []byte, fundingOutputIndex uint32,
+		commitmentHeight uint64) error
+
+	GetLatestLocalCommitment(ctx context.Context, fundingTxid []byte,
+		fundingOutputIndex uint32) (LocalCommitmentInfo, error)
+
+	DeleteLocalCommitment(ctx context.Context,
+		fundingTxid []byte, fundingOutputIndex uint32,
+		commitmentHeight uint64) (bool, error)
 }
 
 // Validation is an interface that abstracts the logic for implementing
@@ -46,5 +56,21 @@ type Validation interface {
 
 	// AddMetadata allows metadata to be passed to the Validator.
 	// This metadata may be used during a future ValidatePSBT call.
-	AddMetadata(metadata []byte) error
+	AddMetadata(ctx context.Context, metadata []byte) error
+}
+
+// LocalCommitmentInfo holds information about a local commitment transaction.
+type LocalCommitmentInfo struct {
+	// CommitmentTxPackage is the serialized psbt request package.
+	CommitmentTxPackage []byte
+
+	// FundingTxid is the transaction id of the funding transaction.
+	FundingTxid []byte
+
+	// FundingOutputIndex is the output index of the channel that the
+	// commitment transaction belongs to in the funding transaction.
+	FundingOutputIndex uint32
+
+	// CommitmentHeight is the height of the commitment transaction.
+	CommitmentHeight uint64
 }

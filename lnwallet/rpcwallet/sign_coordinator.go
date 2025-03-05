@@ -1,9 +1,12 @@
 package rpcwallet
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"github.com/btcsuite/btcd/wire"
+	"github.com/lightningnetwork/lnd/input"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -650,6 +653,53 @@ func (s *SignCoordinator) MuSig2Cleanup(_ context.Context,
 			return resp.GetMuSig2CleanupResponse()
 		},
 	)
+}
+
+// ForwardLocalCommitment sends the current local commitment transaction
+// to the remote signer strictly for informational purposes.
+//
+// Note: this is part of the RemoteSignerInformer interface.
+func (s *SignCoordinator) ForwardLocalCommitment(commitTx *wire.MsgTx,
+	signDesc *input.SignDescriptor) error {
+
+	packet, err := packetFromTx(commitTx)
+	if err != nil {
+		return fmt.Errorf("error converting TX into PSBT: %w", err)
+	}
+
+	err = input.MaybeEnrichPsbt(
+		packet, signDesc.OutSignInfo, signDesc.TransactionType,
+	)
+	if err != nil {
+		return fmt.Errorf("error enriching PSBT outputs: %w", err)
+	}
+
+	var buf bytes.Buffer
+	if err := packet.Serialize(&buf); err != nil {
+		return fmt.Errorf("error serializing PSBT: %w", err)
+	}
+
+	psbtReq := &walletrpc.SignPsbtRequest{FundedPsbt: buf.Bytes()}
+
+	// TODO: Change this to be actually a metadata informing request.
+	req := &walletrpc.SignCoordinatorRequest_LocalCommitmentInfo{
+		LocalCommitmentInfo: psbtReq,
+	}
+
+	_, err = processRequest(
+		s, noTimeout,
+		func(reqId uint64) walletrpc.SignCoordinatorRequest {
+			return walletrpc.SignCoordinatorRequest{
+				RequestId:       reqId,
+				SignRequestType: req,
+			}
+		},
+		func(resp *signerResponse) bool {
+			return resp.GetLocalCommitmentInfoResponse()
+		},
+	)
+
+	return err
 }
 
 // MuSig2CombineSig sends a MuSig2CombineSigRequest to the remote signer and
