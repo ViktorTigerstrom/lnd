@@ -4069,18 +4069,6 @@ func (lc *LightningChannel) SignNextCommitment(
 
 	lc.sigPool.SubmitSignBatch(sigBatch)
 
-	// Ensure that we're passing the correct derivation info to the signer.
-	// Since the SignDescriptor is created when the channel object is
-	// initialized, and reused with every update, we clean up after
-	// ourselves when we're finished signing.
-	lc.signDesc.OutSignInfo = newCommitView.signInfo
-	defer func() { lc.signDesc.OutSignInfo = []input.SignInfo{} }()
-
-	lc.signDesc.TransactionType = input.UnknownOptions(
-		input.RemoteCommitmentTransaction(),
-	)
-	defer func() { lc.signDesc.TransactionType = nil }()
-
 	err = fn.MapOptionZ(lc.auxSigner, func(a AuxSigner) error {
 		return a.SubmitSecondLevelSigBatch(
 			NewAuxChanState(lc.channelState), newCommitView.txn,
@@ -4095,7 +4083,21 @@ func (lc *LightningChannel) SignNextCommitment(
 	// While the jobs are being carried out, we'll Sign their version of
 	// the new commitment transaction while we're waiting for the rest of
 	// the HTLC signatures to be processed.
-	//
+
+	// Ensure that we're passing the correct derivation info to the signer.
+	// Since the SignDescriptor is created when the channel object is
+	// initialized, and reused with every update, we clean up after
+	// ourselves when we're finished signing.
+	lc.signDesc.OutSignInfo = newCommitView.signInfo
+	defer func() { lc.signDesc.OutSignInfo = []input.SignInfo{} }()
+
+	// TODO: IS THIS ACTUALLY SECOND LEVEL TX?
+	// OR IS HTLC SIGS ACTUALLY GENERATED ON THE WATCH-ONLY???
+	lc.signDesc.TransactionType = input.UnknownOptions(
+		input.RemoteCommitmentTransaction(),
+	)
+	defer func() { lc.signDesc.TransactionType = nil }()
+
 	// TODO(roasbeef): abstract into CommitSigner interface?
 	if lc.channelState.ChanType.IsTaproot() {
 		// In this case, we'll send out a partial signature as this is

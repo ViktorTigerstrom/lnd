@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/lightningnetwork/lnd/channeldb"
 	"github.com/lightningnetwork/lnd/input"
 	"github.com/lightningnetwork/lnd/lnwallet"
 	"os"
@@ -263,8 +264,22 @@ func (r *OutboundConnection) connect(ctx context.Context,
 // Note: this is part of the RemoteSignerInformer interface.
 func (r *OutboundConnection) ForwardLocalCommitment(_ *wire.MsgTx,
 	_ *input.SignDescriptor) error {
+
 	// We never need to forward local commitment transactions when using an
 	// outbound connection.
+	return nil
+}
+
+// ForwardFundingInfo sends the information regarding the channel when
+// channel has been funded and has a valid funding outpoint.
+//
+// Note: this is part of the RemoteSignerInformer interface.
+func (r *OutboundConnection) ForwardFundingInfo(_ *wire.OutPoint,
+	_ *channeldb.ChannelConfig, _ *channeldb.ChannelConfig,
+	_ channeldb.ChannelType, _ bool) error {
+
+	// We never need to forward funding information when using an outbound
+	// connection.
 	return nil
 }
 

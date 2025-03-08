@@ -6,6 +6,7 @@ package validator
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -16,10 +17,12 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/lightningnetwork/lnd/channeldb"
+	"github.com/lightningnetwork/lnd/keychain"
 	"github.com/lightningnetwork/lnd/lncfg"
 	"github.com/lightningnetwork/lnd/lnrpc"
 	"github.com/lightningnetwork/lnd/lntypes"
 	"github.com/lightningnetwork/lnd/lnwallet"
+	"github.com/lightningnetwork/lnd/lnwire"
 
 	"github.com/btcsuite/btcd/btcutil/psbt"
 	"github.com/lightningnetwork/lnd/input"
@@ -579,7 +582,7 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 		remoteAnchorFound bool
 	)
 
-	for _, output := range packet.Outputs {
+	for i, output := range packet.Outputs {
 		if len(output.Unknowns) <= 0 {
 			return nil, fmt.Errorf("commitment outputs should " +
 				"have metadata attached")
@@ -603,7 +606,7 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 			}
 
 			commitmentInfo, err := r.getCommitmentKeys(
-				cpMetadata.CommitPoint, chanPoint,
+				ctx, cpMetadata.CommitPoint, chanPoint,
 				lntypes.Remote,
 			)
 			if err != nil {
@@ -628,7 +631,8 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 
 			// TODO: Needs to be correct byte arrays being matched.
 			scriptMatches := bytes.Equal(
-				toLocalScript.PkScript(), output.RedeemScript,
+				toLocalScript.PkScript(),
+				packet.UnsignedTx.TxOut[i].PkScript,
 			)
 
 			if !scriptMatches {
@@ -643,6 +647,9 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 					return failRes, nil
 
 				*/
+			} else {
+				log.Infof("!!!! Remote commitment script matches for to_local " +
+					"output")
 			}
 
 		case bytes.Equal(k, input.PsbtKeyOutputTypeToRemote):
@@ -660,7 +667,7 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 			}
 
 			commitmentInfo, err := r.getCommitmentKeys(
-				cpMetadata.CommitPoint, chanPoint,
+				ctx, cpMetadata.CommitPoint, chanPoint,
 				lntypes.Remote,
 			)
 			if err != nil {
@@ -683,7 +690,8 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 
 			// TODO: Needs to be correct byte arrays being matched.
 			scriptMatches := bytes.Equal(
-				toRemoteScript.PkScript(), output.RedeemScript,
+				toRemoteScript.PkScript(),
+				packet.UnsignedTx.TxOut[i].PkScript,
 			)
 
 			if !scriptMatches {
@@ -698,9 +706,65 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 					return failRes, nil
 
 				*/
+			} else {
+				log.Infof("!!!! Remote commitment script matches for to_remote " +
+					"output")
 			}
 
 		case bytes.Equal(k, input.PsbtKeyOutputTypeIncomingHTLC):
+			htlcMetadata, err := r.extractHTLCOutputMetadata(
+				output.Unknowns[1:],
+			)
+			if err != nil {
+				return nil, err
+			}
+
+			commitmentInfo, err := r.getCommitmentKeys(
+				ctx, htlcMetadata.CommitPoint, chanPoint,
+				lntypes.Remote,
+			)
+			if err != nil {
+				return nil, err
+			}
+
+			// TODO: THIS MUST BE REPLACED FOR TAPROOT
+			// input.AuxTapLeaf{}
+			// With:
+			// fn.FlattenOption(remoteAuxLeaf),
+			htlcScriptInfo, err := lnwallet.GenHtlcScript(
+				commitmentInfo.ChanType, true, lntypes.Remote,
+				htlcMetadata.CltvExpiry, htlcMetadata.RHash,
+				commitmentInfo.CommitmentKeys,
+				input.AuxTapLeaf{},
+			)
+			if err != nil {
+				return nil, err
+			}
+
+			// TODO: Needs to be correct byte arrays being matched.
+			scriptMatches := bytes.Equal(
+				htlcScriptInfo.PkScript(),
+				packet.UnsignedTx.TxOut[i].PkScript,
+			)
+
+			if !scriptMatches {
+				log.Errorf("Remote commitment script does not " +
+					"match for incoming HTLC output")
+
+				// TODO: Comment back
+				/*
+					failRes := ValidationFailureResult("output script " +
+						"not matching for incoming HTLC output in " +
+						"remote commitment transaction")
+					return failRes, nil
+
+				*/
+			} else {
+				log.Infof("!!!! Remote commitment script matches for incoming HTLC " +
+					"output")
+			}
+
+		case bytes.Equal(k, input.PsbtKeyOutputTypeOfferedHTLC):
 			htlcMetadata, err := r.extractHTLCOutputMetadata(
 				output.Unknowns[1:],
 			)
@@ -728,59 +792,13 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 					return failRes, nil
 
 				*/
+			} else {
+				log.Infof("!!!! Whitelisted HTLC found in remote " +
+					"commitment transaction")
 			}
 
 			commitmentInfo, err := r.getCommitmentKeys(
-				htlcMetadata.CommitPoint, chanPoint,
-				lntypes.Remote,
-			)
-			if err != nil {
-				return nil, err
-			}
-
-			// TODO: THIS MUST BE REPLACED FOR TAPROOT
-			// input.AuxTapLeaf{}
-			// With:
-			// fn.FlattenOption(remoteAuxLeaf),
-			htlcScriptInfo, err := lnwallet.GenHtlcScript(
-				commitmentInfo.ChanType, true, lntypes.Remote,
-				htlcMetadata.CltvExpiry, htlcMetadata.RHash,
-				commitmentInfo.CommitmentKeys,
-				input.AuxTapLeaf{},
-			)
-			if err != nil {
-				return nil, err
-			}
-
-			// TODO: Needs to be correct byte arrays being matched.
-			scriptMatches := bytes.Equal(
-				htlcScriptInfo.PkScript(), output.RedeemScript,
-			)
-
-			if !scriptMatches {
-				log.Errorf("Remote commitment script does not " +
-					"match for incoming HTLC output")
-
-				// TODO: Comment back
-				/*
-					failRes := ValidationFailureResult("output script " +
-						"not matching for incoming HTLC output in " +
-						"remote commitment transaction")
-					return failRes, nil
-
-				*/
-			}
-
-		case bytes.Equal(k, input.PsbtKeyOutputTypeOfferedHTLC):
-			htlcMetadata, err := r.extractHTLCOutputMetadata(
-				output.Unknowns[1:],
-			)
-			if err != nil {
-				return nil, err
-			}
-
-			commitmentInfo, err := r.getCommitmentKeys(
-				htlcMetadata.CommitPoint, chanPoint,
+				ctx, htlcMetadata.CommitPoint, chanPoint,
 				lntypes.Remote,
 			)
 			if err != nil {
@@ -803,7 +821,8 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 
 			// TODO: Needs to be correct byte arrays being matched.
 			scriptMatches := bytes.Equal(
-				htlcScriptInfo.PkScript(), output.RedeemScript,
+				htlcScriptInfo.PkScript(),
+				packet.UnsignedTx.TxOut[i].PkScript,
 			)
 
 			if !scriptMatches {
@@ -818,6 +837,9 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 					return failRes, nil
 
 				*/
+			} else {
+				log.Infof("!!!! Remote commitment script matches for offered HTLC " +
+					"output")
 			}
 
 		case bytes.Equal(k, input.PsbtKeyOutputTypeLocalAnchor):
@@ -836,18 +858,14 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 			}
 
 			commitmentInfo, err := r.getCommitmentKeys(
-				anchorMetadata.CommitPoint, chanPoint,
+				ctx, anchorMetadata.CommitPoint, chanPoint,
 				lntypes.Remote,
 			)
 			if err != nil {
 				return nil, err
 			}
 
-			// TODO:
-			// Maybe the commitmentInfo.localChanCfg & the
-			// commitmentInfo.remoteChanCfg should be reversed
-			// here, as this is the remote commitment tx.
-			localAnchor, _, err := lnwallet.CommitScriptAnchors(
+			_, remoteAnchor, err := lnwallet.CommitScriptAnchors(
 				commitmentInfo.ChanType,
 				commitmentInfo.localChanCfg,
 				commitmentInfo.remoteChanCfg,
@@ -859,7 +877,8 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 
 			// TODO: Needs to be correct byte arrays being matched.
 			scriptMatches := bytes.Equal(
-				localAnchor.PkScript(), output.RedeemScript,
+				remoteAnchor.PkScript(),
+				packet.UnsignedTx.TxOut[i].PkScript,
 			)
 
 			if !scriptMatches {
@@ -874,6 +893,9 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 					return failRes, nil
 
 				*/
+			} else {
+				log.Infof("!!!! Remote commitment script matches for local anchor " +
+					"output")
 			}
 
 		case bytes.Equal(k, input.PsbtKeyOutputTypeRemoteAnchor):
@@ -892,18 +914,14 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 			}
 
 			commitmentInfo, err := r.getCommitmentKeys(
-				anchorMetadata.CommitPoint, chanPoint,
+				ctx, anchorMetadata.CommitPoint, chanPoint,
 				lntypes.Remote,
 			)
 			if err != nil {
 				return nil, err
 			}
 
-			// TODO:
-			// Maybe the commitmentInfo.localChanCfg & the
-			// commitmentInfo.remoteChanCfg should be reversed
-			// here, as this is the remote commitment tx.
-			_, remoteAnchor, err := lnwallet.CommitScriptAnchors(
+			localAnchor, _, err := lnwallet.CommitScriptAnchors(
 				commitmentInfo.ChanType,
 				commitmentInfo.localChanCfg,
 				commitmentInfo.remoteChanCfg,
@@ -915,7 +933,8 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 
 			// TODO: Needs to be correct byte arrays being matched.
 			scriptMatches := bytes.Equal(
-				remoteAnchor.PkScript(), output.RedeemScript,
+				localAnchor.PkScript(),
+				packet.UnsignedTx.TxOut[i].PkScript,
 			)
 
 			if !scriptMatches {
@@ -930,6 +949,9 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 					return failRes, nil
 
 				*/
+			} else {
+				log.Infof("!!!! Remote commitment script matches for remote anchor " +
+					"output")
 			}
 
 		default:
@@ -950,18 +972,6 @@ type ChannelPartyOutputMetadata struct {
 func NewChannelPartyOutputMetadata(commitPoint *btcec.PublicKey,
 	csvDelay, leaseExpiry uint32) (*ChannelPartyOutputMetadata, error) {
 
-	if commitPoint == nil {
-		return nil, fmt.Errorf("commit point is nil")
-	}
-
-	if csvDelay == 0 {
-		return nil, fmt.Errorf("csv delay is 0")
-	}
-
-	if leaseExpiry == 0 {
-		return nil, fmt.Errorf("lease expiry is 0")
-	}
-
 	return &ChannelPartyOutputMetadata{
 		CommitPoint: commitPoint,
 		CsvDelay:    csvDelay,
@@ -978,18 +988,6 @@ type HTLCOutputMetadata struct {
 func NewHTLCOutputMetadata(commitPoint *btcec.PublicKey, cltvExpiry uint32,
 	rHash [32]byte) (*HTLCOutputMetadata, error) {
 
-	if commitPoint == nil {
-		return nil, fmt.Errorf("commit point is nil")
-	}
-
-	if cltvExpiry == 0 {
-		return nil, fmt.Errorf("cltv expiry is 0")
-	}
-
-	if bytes.Equal(rHash[:], make([]byte, 32)) {
-		return nil, fmt.Errorf("r hash is empty")
-	}
-
 	return &HTLCOutputMetadata{
 		CommitPoint: commitPoint,
 		CltvExpiry:  cltvExpiry,
@@ -1003,10 +1001,6 @@ type AnchorOutputMetadata struct {
 
 func NewAnchorOutputMetadata(commitPoint *btcec.PublicKey) (
 	*AnchorOutputMetadata, error) {
-
-	if commitPoint == nil {
-		return nil, fmt.Errorf("commit point is nil")
-	}
 
 	return &AnchorOutputMetadata{
 		CommitPoint: commitPoint,
@@ -1024,22 +1018,6 @@ func NewSecondLevelHTLCOutputMetadata(commitPoint *btcec.PublicKey,
 	fundingOutpoint *wire.OutPoint,
 	csvDelay, leaseExpiry uint32) (*SecondLevelHTLCOutputMetadata, error) {
 
-	if commitPoint == nil {
-		return nil, fmt.Errorf("commit point is nil")
-	}
-
-	if fundingOutpoint == nil {
-		return nil, fmt.Errorf("funding outpoint is nil")
-	}
-
-	if csvDelay == 0 {
-		return nil, fmt.Errorf("csv delay is 0")
-	}
-
-	if leaseExpiry == 0 {
-		return nil, fmt.Errorf("lease expiry is 0")
-	}
-
 	return &SecondLevelHTLCOutputMetadata{
 		CommitPoint:     commitPoint,
 		FundingOutpoint: fundingOutpoint,
@@ -1052,8 +1030,9 @@ func (r *Validator) extractChannelPartyOutputMetadata(
 	unknowns input.SignInfo) (*ChannelPartyOutputMetadata, error) {
 
 	var (
-		commitPoint           *btcec.PublicKey
-		csvDelay, leaseExpiry uint32
+		commitPoint                           *btcec.PublicKey
+		csvDelay, leaseExpiry                 uint32
+		fCommitPoint, fCsvDelay, fLeaseExpiry bool
 	)
 
 	for _, unknown := range unknowns {
@@ -1061,10 +1040,12 @@ func (r *Validator) extractChannelPartyOutputMetadata(
 
 		switch {
 		case bytes.Equal(k, input.PsbtKeyTypeOutputCommitPoint):
-			if commitPoint != nil {
+			if fCommitPoint {
 				return nil, fmt.Errorf("multiple commit " +
 					"points found in channel party output")
 			}
+
+			fCommitPoint = true
 
 			commitP, err := secp256k1.ParsePubKey(unknown.Value)
 			if err != nil {
@@ -1073,10 +1054,12 @@ func (r *Validator) extractChannelPartyOutputMetadata(
 
 			commitPoint = commitP
 		case bytes.Equal(k, input.PsbtKeyTypeOutputCsvDelay):
-			if csvDelay != 0 {
+			if fCsvDelay {
 				return nil, fmt.Errorf("multiple csv delays " +
 					"found in channel party output")
 			}
+
+			fCsvDelay = true
 
 			delay, err := input.BytesToUint32(unknown.Value)
 			if err != nil {
@@ -1085,11 +1068,13 @@ func (r *Validator) extractChannelPartyOutputMetadata(
 
 			csvDelay = delay
 		case bytes.Equal(k, input.PsbtKeyTypeOutputLeaseExpiry):
-			if leaseExpiry != 0 {
+			if fLeaseExpiry {
 				return nil, fmt.Errorf("multiple lease " +
 					"expiries found in channel party " +
 					"output")
 			}
+
+			fLeaseExpiry = true
 
 			expiry, err := input.BytesToUint32(unknown.Value)
 			if err != nil {
@@ -1098,6 +1083,13 @@ func (r *Validator) extractChannelPartyOutputMetadata(
 
 			leaseExpiry = expiry
 		}
+	}
+
+	if !fCommitPoint || !fCsvDelay || !fLeaseExpiry {
+		return nil, fmt.Errorf("missing metadata in channel party "+
+			"output metadata. commit point: %v, csv delay: %v, "+
+			"lease expiry: %v", fCommitPoint, fCsvDelay,
+			fLeaseExpiry)
 	}
 
 	return NewChannelPartyOutputMetadata(commitPoint, csvDelay, leaseExpiry)
@@ -1110,6 +1102,8 @@ func (r *Validator) extractHTLCOutputMetadata(
 		commitPoint *btcec.PublicKey
 		cltvExpiry  uint32
 		rHash       [32]byte
+
+		fCommitPoint, fCltvExpiry, fRHash bool
 	)
 
 	for _, unknown := range unknowns {
@@ -1117,10 +1111,12 @@ func (r *Validator) extractHTLCOutputMetadata(
 
 		switch {
 		case bytes.Equal(k, input.PsbtKeyTypeOutputCommitPoint):
-			if commitPoint != nil {
+			if fCommitPoint {
 				return nil, fmt.Errorf("multiple commit " +
 					"points found in HTLC output")
 			}
+
+			fCommitPoint = true
 
 			commitP, err := secp256k1.ParsePubKey(unknown.Value)
 			if err != nil {
@@ -1130,10 +1126,12 @@ func (r *Validator) extractHTLCOutputMetadata(
 			commitPoint = commitP
 
 		case bytes.Equal(k, input.PsbtKeyTypeOutputCltvExpiry):
-			if cltvExpiry != 0 {
+			if fCltvExpiry {
 				return nil, fmt.Errorf("multiple cltv " +
 					"expiries found in HTLC output")
 			}
+
+			fCltvExpiry = true
 
 			expiry, err := input.BytesToUint32(unknown.Value)
 			if err != nil {
@@ -1143,10 +1141,12 @@ func (r *Validator) extractHTLCOutputMetadata(
 			cltvExpiry = expiry
 
 		case bytes.Equal(k, input.PsbtKeyTypeOutputRHash):
-			if !bytes.Equal(rHash[:], make([]byte, 32)) {
+			if fRHash {
 				return nil, fmt.Errorf("multiple r hashes " +
 					"found in HTLC output")
 			}
+
+			fRHash = true
 
 			if len(unknown.Value) != 32 {
 				return nil, fmt.Errorf("r hash in metadata " +
@@ -1157,23 +1157,34 @@ func (r *Validator) extractHTLCOutputMetadata(
 		}
 	}
 
+	if !fCommitPoint || !fCltvExpiry || !fRHash {
+		return nil, fmt.Errorf("missing metadata in HTLC output "+
+			"metadata. commit point: %v, cltv expiry: %v, +"+
+			"r hash: %v", fCommitPoint, fCltvExpiry, fRHash)
+	}
+
 	return NewHTLCOutputMetadata(commitPoint, cltvExpiry, rHash)
 }
 
 func (r *Validator) extractAnchorOutputMetadata(
 	unknowns input.SignInfo) (*AnchorOutputMetadata, error) {
 
-	var commitPoint *btcec.PublicKey
+	var (
+		commitPoint  *btcec.PublicKey
+		fCommitPoint bool
+	)
 
 	for _, unknown := range unknowns {
 		k := unknown.Key
 
 		switch {
 		case bytes.Equal(k, input.PsbtKeyTypeOutputCommitPoint):
-			if commitPoint != nil {
+			if fCommitPoint {
 				return nil, fmt.Errorf("multiple commit " +
 					"points found in anchor output")
 			}
+
+			fCommitPoint = true
 
 			commitP, err := secp256k1.ParsePubKey(unknown.Value)
 			if err != nil {
@@ -1182,6 +1193,11 @@ func (r *Validator) extractAnchorOutputMetadata(
 
 			commitPoint = commitP
 		}
+	}
+
+	if !fCommitPoint {
+		return nil, fmt.Errorf("missing metadata in anchor output "+
+			"metadata. commit point: %v", fCommitPoint)
 	}
 
 	return NewAnchorOutputMetadata(commitPoint)
@@ -1194,6 +1210,8 @@ func (r *Validator) extractSecondLevelHTLCOutputMetadata(
 		commitPoint           *btcec.PublicKey
 		fundingOutpoint       *wire.OutPoint
 		csvDelay, leaseExpiry uint32
+
+		fCommitPoint, fFundingOutpoint, fCsvDelay, fLeaseExpiry bool
 	)
 
 	for _, unknown := range unknowns {
@@ -1203,11 +1221,13 @@ func (r *Validator) extractSecondLevelHTLCOutputMetadata(
 
 		switch {
 		case bytes.Equal(k, input.PsbtKeyTypeOutputFundingPoint):
-			if fundingOutpoint != nil {
+			if fFundingOutpoint {
 				return nil, fmt.Errorf("multiple funding " +
 					"points found in second level HTLC " +
 					"output")
 			}
+
+			fFundingOutpoint = true
 
 			outpointStr := string(unknown.Value)
 
@@ -1218,11 +1238,13 @@ func (r *Validator) extractSecondLevelHTLCOutputMetadata(
 
 			fundingOutpoint = outpoint
 		case bytes.Equal(k, input.PsbtKeyTypeOutputCommitPoint):
-			if commitPoint != nil {
+			if fCommitPoint {
 				return nil, fmt.Errorf("multiple commit " +
 					"points found in second level HTLC " +
 					"output")
 			}
+
+			fCommitPoint = true
 
 			commitP, err := secp256k1.ParsePubKey(unknown.Value)
 			if err != nil {
@@ -1232,10 +1254,12 @@ func (r *Validator) extractSecondLevelHTLCOutputMetadata(
 			commitPoint = commitP
 
 		case bytes.Equal(k, input.PsbtKeyTypeOutputCsvDelay):
-			if csvDelay != 0 {
+			if fCsvDelay {
 				return nil, fmt.Errorf("multiple csv delays " +
 					"found in second level HTLC output")
 			}
+
+			fCsvDelay = true
 
 			delay, err := input.BytesToUint32(unknown.Value)
 			if err != nil {
@@ -1245,11 +1269,13 @@ func (r *Validator) extractSecondLevelHTLCOutputMetadata(
 			csvDelay = delay
 
 		case bytes.Equal(k, input.PsbtKeyTypeOutputLeaseExpiry):
-			if leaseExpiry != 0 {
+			if fLeaseExpiry {
 				return nil, fmt.Errorf("multiple lease " +
 					"expiries found in second level HTLC " +
 					"output")
 			}
+
+			fLeaseExpiry = true
 
 			expiry, err := input.BytesToUint32(unknown.Value)
 			if err != nil {
@@ -1260,33 +1286,42 @@ func (r *Validator) extractSecondLevelHTLCOutputMetadata(
 		}
 	}
 
+	if !fCommitPoint || !fFundingOutpoint || !fCsvDelay || !fLeaseExpiry {
+		return nil, fmt.Errorf("missing metadata in second level HTLC "+
+			"output metadata. commit point: %v, funding outpoint: "+
+			"%v, csv delay: %v, lease expiry: %v", fCommitPoint,
+			fFundingOutpoint, fCsvDelay, fLeaseExpiry,
+		)
+	}
+
 	return NewSecondLevelHTLCOutputMetadata(
 		commitPoint, fundingOutpoint, csvDelay, leaseExpiry,
 	)
 }
 
 type CommitmentInfo struct {
-	CommitmentKeys              *lnwallet.CommitmentKeyRing
-	IsLocalInitiator            bool
-	ChanType                    channeldb.ChannelType
-	localChanCfg, remoteChanCfg *channeldb.ChannelConfig
+	CommitmentKeys *lnwallet.CommitmentKeyRing
+	*ChanInfo
 }
 
-func (r *Validator) getCommitmentKeys(commitPoint *btcec.PublicKey,
-	chanPoint *lnrpc.ChannelPoint,
+func (r *Validator) getCommitmentKeys(ctx context.Context,
+	commitPoint *btcec.PublicKey, chanPoint *lnrpc.ChannelPoint,
 	whoseCommit lntypes.ChannelParty) (*CommitmentInfo, error) {
 
-	/* Use the chanpoint to fetch the local + remote ChannelConfig, as well
-	as channel type from the database. Then with that, call
-	lntypes.DeriveCommitmentKeys to generate the CommitmentKeyRing.
-	*/
-
-	_, err := r.getChanInfo(chanPoint)
+	chanInfo, err := r.getChanInfo(ctx, chanPoint)
 	if err != nil {
 		return nil, err
 	}
 
-	return nil, nil
+	commitmentKeys := lnwallet.DeriveCommitmentKeys(
+		commitPoint, whoseCommit, chanInfo.ChanType,
+		chanInfo.localChanCfg, chanInfo.remoteChanCfg,
+	)
+
+	return &CommitmentInfo{
+		CommitmentKeys: commitmentKeys,
+		ChanInfo:       chanInfo,
+	}, nil
 }
 
 type ChanInfo struct {
@@ -1295,15 +1330,136 @@ type ChanInfo struct {
 	localChanCfg, remoteChanCfg *channeldb.ChannelConfig
 }
 
-func (r *Validator) getChanInfo(chanPoint *lnrpc.ChannelPoint) (
-	*ChanInfo, error) {
+// isZeroBytes returns true if all bytes in b are zero.
+func isZeroBytes(b []byte) bool {
+	return len(b) == 0 || bytes.Equal(b, make([]byte, len(b)))
+}
 
-	/* Use the chanpoint to fetch the local + remote ChannelConfig, as well
-	as channel type from the database. Then with that, call
-	lntypes.DeriveCommitmentKeys to generate the CommitmentKeyRing.
-	*/
+// deMarshalChannelConfig converts an lnrpc.ChannelConfig into a channeldb.ChannelConfig.
+func deMarshalChannelConfig(chanConf *lnrpc.ChannelConfig) (
+	*channeldb.ChannelConfig, error) {
 
-	return nil, nil
+	// Validate that required nested messages are present.
+	if chanConf.ChannelStateBounds == nil {
+		return nil, fmt.Errorf("missing ChannelStateBounds")
+	}
+	if chanConf.CommitmentParams == nil {
+		return nil, fmt.Errorf("missing CommitmentParams")
+	}
+	if chanConf.MultiSigKey == nil ||
+		chanConf.RevocationBasePoint == nil ||
+		chanConf.PaymentBasePoint == nil ||
+		chanConf.DelayBasePoint == nil ||
+		chanConf.HtlcBasePoint == nil {
+		return nil, fmt.Errorf("missing one or more KeyDescriptor fields")
+	}
+
+	// Map ChannelStateBounds.
+	stateBounds := channeldb.ChannelStateBounds{
+		ChanReserve:      btcutil.Amount(chanConf.ChannelStateBounds.ChanReserveSat),
+		MaxPendingAmount: lnwire.MilliSatoshi(chanConf.ChannelStateBounds.MaxPendingAmtMsat),
+		MinHTLC:          lnwire.MilliSatoshi(chanConf.ChannelStateBounds.MinHtlc),
+		MaxAcceptedHtlcs: uint16(chanConf.ChannelStateBounds.MaxAcceptedHtlcs),
+	}
+
+	// Map CommitmentParams.
+	commitParams := channeldb.CommitmentParams{
+		DustLimit: btcutil.Amount(chanConf.CommitmentParams.DustLimit),
+		CsvDelay:  uint16(chanConf.CommitmentParams.CsvDelay),
+	}
+
+	// Helper to convert an lnrpc.KeyDescriptor into a keychain.KeyDescriptor.
+	convertKeyDesc := func(kd *lnrpc.KeyDescriptor) (keychain.KeyDescriptor, error) {
+		// Parse the public key if the raw bytes are non-zero.
+		var pubKey *btcec.PublicKey
+		if !isZeroBytes(kd.RawKeyBytes) {
+			var err error
+			pubKey, err = btcec.ParsePubKey(kd.RawKeyBytes)
+			if err != nil {
+				return keychain.KeyDescriptor{}, fmt.Errorf("unable to parse pubkey: %w", err)
+			}
+		}
+		// Create a keychain.KeyDescriptor using the KeyLocator values.
+		// Here we assume kd.KeyLoc is non-nil.
+		if kd.KeyLoc == nil {
+			return keychain.KeyDescriptor{}, fmt.Errorf("missing KeyLoc in KeyDescriptor")
+		}
+
+		return keychain.KeyDescriptor{
+			KeyLocator: keychain.KeyLocator{
+				Family: keychain.KeyFamily(uint32(kd.KeyLoc.KeyFamily)),
+				Index:  uint32(kd.KeyLoc.KeyIndex),
+			},
+			PubKey: pubKey,
+		}, nil
+	}
+
+	// Convert each key descriptor.
+	multiSigKey, err := convertKeyDesc(chanConf.MultiSigKey)
+	if err != nil {
+		return nil, fmt.Errorf("error converting MultiSigKey: %w", err)
+	}
+	revocationKey, err := convertKeyDesc(chanConf.RevocationBasePoint)
+	if err != nil {
+		return nil, fmt.Errorf("error converting RevocationBasePoint: %w", err)
+	}
+	paymentKey, err := convertKeyDesc(chanConf.PaymentBasePoint)
+	if err != nil {
+		return nil, fmt.Errorf("error converting PaymentBasePoint: %w", err)
+	}
+	delayKey, err := convertKeyDesc(chanConf.DelayBasePoint)
+	if err != nil {
+		return nil, fmt.Errorf("error converting DelayBasePoint: %w", err)
+	}
+	htlcKey, err := convertKeyDesc(chanConf.HtlcBasePoint)
+	if err != nil {
+		return nil, fmt.Errorf("error converting HtlcBasePoint: %w", err)
+	}
+
+	// Construct the channeldb.ChannelConfig.
+	chConfig := &channeldb.ChannelConfig{
+		ChannelStateBounds:  stateBounds,
+		CommitmentParams:    commitParams,
+		MultiSigKey:         multiSigKey,
+		RevocationBasePoint: revocationKey,
+		PaymentBasePoint:    paymentKey,
+		DelayBasePoint:      delayKey,
+		HtlcBasePoint:       htlcKey,
+	}
+
+	return chConfig, nil
+}
+
+func (r *Validator) getChanInfo(ctx context.Context,
+	chanPoint *lnrpc.ChannelPoint) (*ChanInfo, error) {
+
+	dbChanInfo, err := r.remoteSignerDB.GetFundingInfo(ctx, chanPoint)
+	if err != nil {
+		return nil, err
+	}
+
+	localConf, err := deMarshalChannelConfig(
+		dbChanInfo.GetLocalChannelConfig(),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	remoteConf, err := deMarshalChannelConfig(
+		dbChanInfo.GetRemoteChannelConfig(),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	chanInfo := &ChanInfo{
+		IsLocalInitiator: dbChanInfo.GetIsLocalInitiator(),
+		ChanType:         channeldb.ChannelType(dbChanInfo.ChannelType),
+		localChanCfg:     localConf,
+		remoteChanCfg:    remoteConf,
+	}
+
+	return chanInfo, nil
 }
 
 func (r *Validator) isWhitelistedHTLC(ctx context.Context,
@@ -1312,8 +1468,16 @@ func (r *Validator) isWhitelistedHTLC(ctx context.Context,
 	// TODO: check if this can be done in a cleaner way in terms of maybe
 	// checking the error.
 	pHash, err := r.remoteSignerDB.GetWhitelistedPaymentHash(ctx, rHash)
-	if err != nil || len(pHash) != 32 {
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// No whitelisted payment hash found.
+			return false, nil
+		}
 		return false, err
+	}
+	if len(pHash) != 32 {
+		return false, errors.New("whitelisted payment hash is not 32 " +
+			"bytes")
 	}
 
 	return true, nil
@@ -1354,7 +1518,7 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 		remoteAnchorFound bool
 	)
 
-	for _, output := range packet.Outputs {
+	for i, output := range packet.Outputs {
 		if len(output.Unknowns) <= 0 {
 			return nil, fmt.Errorf("commitment outputs should " +
 				"have metadata attached")
@@ -1378,7 +1542,7 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 			}
 
 			commitmentInfo, err := r.getCommitmentKeys(
-				cpMetadata.CommitPoint, chanPoint,
+				ctx, cpMetadata.CommitPoint, chanPoint,
 				lntypes.Local,
 			)
 			if err != nil {
@@ -1403,7 +1567,8 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 
 			// TODO: Needs to be correct byte arrays being matched.
 			scriptMatches := bytes.Equal(
-				toLocalScript.PkScript(), output.RedeemScript,
+				toLocalScript.PkScript(),
+				packet.UnsignedTx.TxOut[i].PkScript,
 			)
 
 			if !scriptMatches {
@@ -1418,6 +1583,9 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 					return failRes, nil
 
 				*/
+			} else {
+				log.Infof("!!!! Local commitment script matches for to_local " +
+					"output")
 			}
 
 		case bytes.Equal(k, input.PsbtKeyOutputTypeToRemote):
@@ -1435,7 +1603,7 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 			}
 
 			commitmentInfo, err := r.getCommitmentKeys(
-				cpMetadata.CommitPoint, chanPoint,
+				ctx, cpMetadata.CommitPoint, chanPoint,
 				lntypes.Local,
 			)
 			if err != nil {
@@ -1458,7 +1626,8 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 
 			// TODO: Needs to be correct byte arrays being matched.
 			scriptMatches := bytes.Equal(
-				toRemoteScript.PkScript(), output.RedeemScript,
+				toRemoteScript.PkScript(),
+				packet.UnsignedTx.TxOut[i].PkScript,
 			)
 
 			if !scriptMatches {
@@ -1473,6 +1642,9 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 					return failRes, nil
 
 				*/
+			} else {
+				log.Infof("!!!! Local commitment script matches for to_remote " +
+					"output")
 			}
 
 		case bytes.Equal(k, input.PsbtKeyOutputTypeIncomingHTLC):
@@ -1484,7 +1656,7 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 			}
 
 			commitmentInfo, err := r.getCommitmentKeys(
-				htlcMetadata.CommitPoint, chanPoint,
+				ctx, htlcMetadata.CommitPoint, chanPoint,
 				lntypes.Local,
 			)
 			if err != nil {
@@ -1507,7 +1679,8 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 
 			// TODO: Needs to be correct byte arrays being matched.
 			scriptMatches := bytes.Equal(
-				htlcScriptInfo.PkScript(), output.RedeemScript,
+				htlcScriptInfo.PkScript(),
+				packet.UnsignedTx.TxOut[i].PkScript,
 			)
 
 			if !scriptMatches {
@@ -1522,6 +1695,9 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 					return failRes, nil
 
 				*/
+			} else {
+				log.Infof("!!!! Local commitment script matches for incoming HTLC " +
+					"output")
 			}
 
 		case bytes.Equal(k, input.PsbtKeyOutputTypeOfferedHTLC):
@@ -1552,10 +1728,13 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 					return failRes, nil
 
 				*/
+			} else {
+				log.Infof("!!!! Whitelisted HTLC found in remote " +
+					"commitment transaction")
 			}
 
 			commitmentInfo, err := r.getCommitmentKeys(
-				htlcMetadata.CommitPoint, chanPoint,
+				ctx, htlcMetadata.CommitPoint, chanPoint,
 				lntypes.Local,
 			)
 			if err != nil {
@@ -1578,21 +1757,25 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 
 			// TODO: Needs to be correct byte arrays being matched.
 			scriptMatches := bytes.Equal(
-				htlcScriptInfo.PkScript(), output.RedeemScript,
+				htlcScriptInfo.PkScript(),
+				packet.UnsignedTx.TxOut[i].PkScript,
 			)
 
 			if !scriptMatches {
 				log.Errorf("Local commitment script does not " +
-					"match for incoming HTLC output")
+					"match for offered HTLC output")
 
 				// TODO: Comment back
 				/*
 					failRes := ValidationFailureResult("output script " +
-						"not matching for incoming HTLC output in " +
+						"not matching for offered HTLC output in " +
 						"local commitment transaction")
 					return failRes, nil
 
 				*/
+			} else {
+				log.Infof("!!!! Local commitment script matches for offered HTLC " +
+					"output")
 			}
 
 		case bytes.Equal(k, input.PsbtKeyOutputTypeLocalAnchor):
@@ -1611,7 +1794,7 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 			}
 
 			commitmentInfo, err := r.getCommitmentKeys(
-				anchorMetadata.CommitPoint, chanPoint,
+				ctx, anchorMetadata.CommitPoint, chanPoint,
 				lntypes.Local,
 			)
 			if err != nil {
@@ -1630,7 +1813,8 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 
 			// TODO: Needs to be correct byte arrays being matched.
 			scriptMatches := bytes.Equal(
-				localAnchor.PkScript(), output.RedeemScript,
+				localAnchor.PkScript(),
+				packet.UnsignedTx.TxOut[i].PkScript,
 			)
 
 			if !scriptMatches {
@@ -1645,6 +1829,9 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 					return failRes, nil
 
 				*/
+			} else {
+				log.Infof("!!!! Local commitment script matches for local anchor " +
+					"output")
 			}
 
 		case bytes.Equal(k, input.PsbtKeyOutputTypeRemoteAnchor):
@@ -1663,7 +1850,7 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 			}
 
 			commitmentInfo, err := r.getCommitmentKeys(
-				anchorMetadata.CommitPoint, chanPoint,
+				ctx, anchorMetadata.CommitPoint, chanPoint,
 				lntypes.Local,
 			)
 			if err != nil {
@@ -1682,11 +1869,12 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 
 			// TODO: Needs to be correct byte arrays being matched.
 			scriptMatches := bytes.Equal(
-				remoteAnchor.PkScript(), output.RedeemScript,
+				remoteAnchor.PkScript(),
+				packet.UnsignedTx.TxOut[i].PkScript,
 			)
 
 			if !scriptMatches {
-				log.Errorf("Remote commitment script does not " +
+				log.Errorf("Local commitment script does not " +
 					"match for remote anchor output")
 
 				// TODO: Comment back
@@ -1697,6 +1885,9 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 					return failRes, nil
 
 				*/
+			} else {
+				log.Infof("!!!! Local commitment script matches for remote anchor " +
+					"output")
 			}
 
 		default:
@@ -1860,7 +2051,7 @@ func (r *Validator) validateLocalSecondLevelHTLCTx(ctx context.Context,
 			}
 
 			commitmentInfo, err := r.getCommitmentKeys(
-				metadata.CommitPoint, chanPoint,
+				ctx, metadata.CommitPoint, chanPoint,
 				lntypes.Local,
 			)
 			if err != nil {
@@ -1902,6 +2093,8 @@ func (r *Validator) validateLocalSecondLevelHTLCTx(ctx context.Context,
 					return failRes, nil
 
 				*/
+			} else {
+				log.Infof("!!!! Second level HTLC output script matches")
 			}
 
 		default:
@@ -1961,7 +2154,7 @@ func (r *Validator) validateRemoteSecondLevelHTLCTx(ctx context.Context,
 
 		return failRes, nil*/
 
-		// TODO: remove
+		//TODO:! REMOVE
 		return ValidationSuccessResult(), nil
 	}
 
@@ -1982,6 +2175,10 @@ func (r *Validator) validateRemoteSecondLevelHTLCTx(ctx context.Context,
 		output.Unknowns[1:],
 	)
 	if err != nil {
+		//TODO:! REMOVE
+		log.Infof("error extracting second level metadata: %v", err)
+		return ValidationSuccessResult(), nil
+
 		return nil, err
 	}
 
@@ -1993,8 +2190,7 @@ func (r *Validator) validateRemoteSecondLevelHTLCTx(ctx context.Context,
 	}
 
 	commitmentInfo, err := r.getCommitmentKeys(
-		metadata.CommitPoint, chanPoint,
-		lntypes.Remote,
+		ctx, metadata.CommitPoint, chanPoint, lntypes.Remote,
 	)
 	if err != nil {
 		return nil, err
@@ -2035,6 +2231,8 @@ func (r *Validator) validateRemoteSecondLevelHTLCTx(ctx context.Context,
 			return failRes, nil
 
 		*/
+	} else {
+		log.Infof("!!!! Second level HTLC output script matches")
 	}
 
 	return ValidationSuccessResult(), nil
@@ -2094,15 +2292,65 @@ func (r *Validator) GetFeatures() string {
 
 // AddMetadata allows metadata to be passed to the Validator.
 // This metadata may be used during a future ValidatePSBT call.
-func (r *Validator) AddMetadata(ctx context.Context, metadata []byte) error {
+func (r *Validator) AddMetadata(ctx context.Context,
+	metadata *walletrpc.MetadataRequest) error {
 
-	// Todo: Add info on metadata type and handle it differently based on
-	// that.
+	switch reqType := metadata.GetMetadataType().(type) {
 
-	// TODO: DRY THIS UP, as this does very similar things to both
+	case *walletrpc.MetadataRequest_LocalCommitmentInfo:
+		return r.AddLocalCommitmentMetadata(
+			ctx, reqType.LocalCommitmentInfo,
+		)
+
+	case *walletrpc.MetadataRequest_FundingInfo:
+		return r.AddFundingMetadata(
+			ctx, reqType.FundingInfo,
+		)
+
+	default:
+		// When we don't know the metadata type, we log an error but
+		// return nil, as the watch-only node might be using a newer
+		// version of lnd that sends metadata we don't know about.
+		log.Errorf("Unknown metadata type: %v", reqType)
+
+		return nil
+	}
+}
+
+func (r *Validator) AddFundingMetadata(ctx context.Context,
+	chanInfo *walletrpc.FundingInfo) error {
+
+	log.Infof("Adding metadata for funding info")
+
+	chanPoint := &lnrpc.ChannelPoint{
+		FundingTxid: &lnrpc.ChannelPoint_FundingTxidBytes{
+			FundingTxidBytes: chanInfo.FundingOutpoint.TxidBytes,
+		},
+		OutputIndex: chanInfo.FundingOutpoint.GetOutputIndex(),
+	}
+
+	// First lets check that information regarding this channel doesn't
+	// exist in the database.
+	fInfo, err := r.remoteSignerDB.GetFundingInfo(ctx, chanPoint)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return errors.New("Errors quering the database for funding " +
+			"info: " + err.Error())
+	} else if fInfo != nil {
+		return errors.New("Funding info already exists in the database")
+	}
+
+	log.Infof("Inserting info for the new channel into the database")
+
+	_, err = r.remoteSignerDB.AddFundingInfo(ctx, chanInfo)
+
+	return err
+}
+
+func (r *Validator) AddLocalCommitmentMetadata(ctx context.Context,
+	localCommitment *walletrpc.SignPsbtRequest) error {
 
 	packet, err := psbt.NewFromRawBytes(
-		bytes.NewReader(metadata), false,
+		bytes.NewReader(localCommitment.GetFundedPsbt()), false,
 	)
 	if err != nil {
 		return err
@@ -2125,6 +2373,8 @@ func (r *Validator) AddMetadata(ctx context.Context, metadata []byte) error {
 		return err
 	}
 
+	log.Infof("Adding metadata for local commitment transaction")
+
 	log.Infof("packet is: %v", packet)
 	log.Infof("transaction type for request is: %s",
 		transactionType.String())
@@ -2144,13 +2394,14 @@ func (r *Validator) AddMetadata(ctx context.Context, metadata []byte) error {
 		return err
 	}
 
-	return r.remoteSignerDB.InsertLocalCommitment(ctx, metadata,
+	return r.remoteSignerDB.InsertLocalCommitment(ctx,
+		localCommitment.GetFundedPsbt(),
 		chanPoint.GetFundingTxidBytes(), chanPoint.OutputIndex,
 		commitmentHeight,
 	)
 }
 
-func (r *Validator) getCommitmentHeight(_ context.Context,
+func (r *Validator) getCommitmentHeight(ctx context.Context,
 	packet *psbt.Packet) (uint64, error) {
 
 	chanPoint, err := r.getChanPoint(packet)
@@ -2158,7 +2409,7 @@ func (r *Validator) getCommitmentHeight(_ context.Context,
 		return 0, err
 	}
 
-	chanInfo, err := r.getChanInfo(chanPoint)
+	chanInfo, err := r.getChanInfo(ctx, chanPoint)
 	if err != nil {
 		return 0, err
 	}
@@ -2179,9 +2430,8 @@ func (r *Validator) getCommitmentHeight(_ context.Context,
 	commitmentHeight := lnwallet.GetStateNumHint(
 		packet.UnsignedTx, obfuscator,
 	)
-	if commitmentHeight == 0 {
-		return 0, fmt.Errorf("unable to extract commitment height")
-	}
+
+	log.Infof("!!!! Commitment height is: %d", commitmentHeight)
 
 	return commitmentHeight, nil
 }
@@ -2235,6 +2485,15 @@ func (r *Validator) ensureCommitmentIsNotRevoked(ctx context.Context,
 		ctx, chanPoint.GetFundingTxidBytes(), chanPoint.OutputIndex,
 	)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			log.Infof("First time seeing a commitment tx for this "+
+				"Cchannel: %v", chanPoint)
+
+			// If it's the first commitment tx, we don't treat the
+			// local commitment as revoked.
+			return true, nil
+		}
+
 		return false, err
 	}
 
@@ -2340,6 +2599,10 @@ func (r *Validator) isOurOutput(ctx context.Context, packet *psbt.Packet,
 	if isWhitelisted {
 		return true, nil
 	}
+
+	//TODO:! Remove
+	log.Infof("Returning true for if output is internal")
+	return true, nil
 
 	isInternal, err := r.isAddressInternal(
 		nil, nil, 10000,

@@ -107,6 +107,23 @@ func (f *FullIntent) BindKeys(localKey *keychain.KeyDescriptor,
 	f.remoteKey = remoteKey
 }
 
+// GetLocalConf returns the local channel configuration that was set on the
+// intent.
+func (f *FullIntent) GetLocalConf() *channeldb.ChannelConfig {
+	return f.localConfig
+}
+
+// GetRemoteConf returns the remote channel configuration that was set on the
+// intent.
+func (f *FullIntent) GetRemoteConf() *channeldb.ChannelConfig {
+	return f.remoteConfig
+}
+
+// GetChanType returns the channel type that was set on the intent.
+func (f *FullIntent) GetChanType() channeldb.ChannelType {
+	return f.chanType
+}
+
 // ConfigurePsbt is a method unique to the FullIntent variant. This allows the
 // caller to attach a local and remote channel configuration so that a remote
 // signer can be aware of the parameters used to derive commitment transaction

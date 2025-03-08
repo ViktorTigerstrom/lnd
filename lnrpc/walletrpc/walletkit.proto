@@ -437,12 +437,9 @@ message SignCoordinatorRequest {
         SignPsbtRequest sign_psbt_request = 11;
 
         /*
-        Informs the remote signer of the current local commitment transaction.
-        Note: This is not a request to the remote signer to sign the local
-        commitment, it is strictly only used for informing remote signer about
-        the latest local commitment transaction.
+        Forwards metadata to the remote signer.
         */
-        SignPsbtRequest local_commitment_info = 12;
+        MetadataRequest metadata_request = 12;
     }
 }
 
@@ -527,8 +524,56 @@ message SignCoordinatorResponse {
         request, to signal that the remote signer has received the local
         commitment info.
         */
-        bool local_commitment_info_response = 13;
+        bool metadata_received = 13;
     }
+}
+
+message MetadataRequest {
+    /*
+    The forwarded metadata to the remote signer can only be of certain types.
+    */
+    oneof metadata_type {
+        /*
+        Informs the remote signer of the current local commitment transaction.
+        Note: This is not a request to the remote signer to sign the local
+        commitment, it is strictly only used for informing remote signer about
+        the latest local commitment transaction.
+        */
+        SignPsbtRequest local_commitment_info = 1;
+
+        /*
+        Informs the remote signer of information regarding a new channel when
+        channel has been funded and has a valid funding outpoint.
+        */
+        FundingInfo funding_info = 2;
+    }
+}
+
+message FundingInfo {
+    /*
+    The funding outpoint for the channel.
+    */
+    lnrpc.OutPoint funding_outpoint = 1;
+
+    /*
+    The channel type of the channel.
+     */
+    uint64 channel_type = 2;
+
+    /*
+    Signals if the local node is the initiator of the channel.
+     */
+    bool is_local_initiator = 3;
+
+    /*
+    The local channel config of the channel.
+     */
+    lnrpc.ChannelConfig local_channel_config = 4;
+
+    /*
+    The remote channel config of the channel.
+     */
+    lnrpc.ChannelConfig remote_channel_config = 5;
 }
 
 message SignerError {

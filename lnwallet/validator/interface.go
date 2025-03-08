@@ -2,6 +2,7 @@ package validator
 
 import (
 	"context"
+	"github.com/lightningnetwork/lnd/lnrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/walletrpc"
 )
 
@@ -38,6 +39,17 @@ type RemoteSignerDB interface {
 	DeleteLocalCommitment(ctx context.Context,
 		fundingTxid []byte, fundingOutputIndex uint32,
 		commitmentHeight uint64) (bool, error)
+
+	// AddFundingInfo inserts the FundingInfo (along with its associated
+	// key descriptors and channel configurations) into the database in a
+	// single transaction.
+	AddFundingInfo(ctx context.Context,
+		fi *walletrpc.FundingInfo) (uint64, error)
+
+	// GetFundingInfo retrieves a FundingInfo object from the database given
+	// a channel's ChannelPoint.
+	GetFundingInfo(ctx context.Context,
+		chanPoint *lnrpc.ChannelPoint) (*walletrpc.FundingInfo, error)
 }
 
 // Validation is an interface that abstracts the logic for implementing
@@ -56,7 +68,8 @@ type Validation interface {
 
 	// AddMetadata allows metadata to be passed to the Validator.
 	// This metadata may be used during a future ValidatePSBT call.
-	AddMetadata(ctx context.Context, metadata []byte) error
+	AddMetadata(ctx context.Context,
+		metadata *walletrpc.MetadataRequest) error
 }
 
 // LocalCommitmentInfo holds information about a local commitment transaction.

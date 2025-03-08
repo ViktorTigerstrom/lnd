@@ -41,7 +41,9 @@ func (r *Validator) GetFeatures() string {
 
 // AddMetadata allows metadata to be passed to the Validator.
 // This metadata may be used during a future ValidatePSBT call.
-func (r *Validator) AddMetadata(ctx context.Context, metadata []byte) error {
+func (r *Validator) AddMetadata(ctx context.Context,
+	metadata *walletrpc.MetadataRequest) error {
+
 	return nil
 }
 

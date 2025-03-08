@@ -35,6 +35,33 @@ type AmpSubInvoiceHtlc struct {
 	Preimage   []byte
 }
 
+type ChannelConfig struct {
+	ID                    int64
+	ChanReserveSat        int64
+	MaxPendingAmtMsat     int64
+	MinHtlc               int64
+	MaxAcceptedHtlcs      int32
+	DustLimit             int64
+	CsvDelay              int32
+	MultiSigKeyID         int64
+	RevocationBasePointID int64
+	PaymentBasePointID    int64
+	DelayBasePointID      int64
+	HtlcBasePointID       int64
+}
+
+type ChannelInfo struct {
+	ID                    int64
+	TxidBytes             []byte
+	TxidStr               string
+	OutputIndex           int32
+	ChannelType           int64
+	IsLocalInitiator      bool
+	LocalChannelConfigID  int64
+	RemoteChannelConfigID int64
+	CreatedAt             time.Time
+}
+
 type Invoice struct {
 	ID                 int64
 	Hash               []byte
@@ -97,6 +124,13 @@ type InvoiceHtlcCustomRecord struct {
 type InvoiceSequence struct {
 	Name         string
 	CurrentValue int64
+}
+
+type KeyDescriptor struct {
+	ID          int64
+	RawKeyBytes []byte
+	KeyFamily   int32
+	KeyIndex    int32
 }
 
 type LocalCommitment struct {

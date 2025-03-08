@@ -1643,6 +1643,7 @@ func newServer(cfg *Config, listenAddrs []net.Addr,
 		AuxFundingController: implCfg.AuxFundingController,
 		AuxSigner:            implCfg.AuxSigner,
 		AuxResolver:          implCfg.AuxContractResolver,
+		RemoteSignerInformer: s.rsInformer,
 	})
 	if err != nil {
 		return nil, err

@@ -43,7 +43,9 @@ func (t TransactionType) String() string {
 	case FundingTransaction:
 		return "funding_transaction"
 	case LocalSecondLevelHTLCTransaction:
-		return "second_level_htlc_transaction"
+		return "local_second_level_htlc_transaction"
+	case RemoteSecondLevelHTLCTransaction:
+		return "remote_second_level_htlc_transaction"
 	default:
 		return "unknown"
 	}

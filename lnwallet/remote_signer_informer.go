@@ -2,6 +2,7 @@ package lnwallet
 
 import (
 	"github.com/btcsuite/btcd/wire"
+	"github.com/lightningnetwork/lnd/channeldb"
 	"github.com/lightningnetwork/lnd/input"
 )
 
@@ -12,4 +13,12 @@ type RemoteSignerInformer interface {
 	// to the remote signer strictly for informational purposes.
 	ForwardLocalCommitment(commitTx *wire.MsgTx,
 		signDesc *input.SignDescriptor) error
+
+	// ForwardFundingInfo sends the information regarding the channel when
+	// channel has been funded and has a valid funding outpoint.
+	ForwardFundingInfo(fundingPoint *wire.OutPoint,
+		localChanCfg *channeldb.ChannelConfig,
+		remoteChanCfg *channeldb.ChannelConfig,
+		chanType channeldb.ChannelType,
+		isLocalInitiator bool) error
 }

@@ -763,6 +763,7 @@ func (d *DefaultWalletImpl) BuildChainControl(
 		CoinSelectionStrategy: walletConfig.CoinSelectionStrategy,
 		AuxLeafStore:          partialChainControl.Cfg.AuxLeafStore,
 		AuxSigner:             partialChainControl.Cfg.AuxSigner,
+		RemoteSignerInformer:  fn.None[lnwallet.RemoteSignerInformer](),
 	}
 
 	// The broadcast is already always active for neutrino nodes, so we
@@ -898,6 +899,10 @@ func (d *RPCSignerWalletImpl) BuildChainControl(
 		return nil, cleanUp, err
 	}
 
+	var rsInformer = fn.Some[lnwallet.RemoteSignerInformer](
+		rpcKeyRing.RemoteSignerConnection(),
+	)
+
 	// Create, and start the lnwallet, which handles the core payment
 	// channel logic, and exposes control via proxy state machines.
 	lnWalletConfig := lnwallet.Config{
@@ -910,6 +915,7 @@ func (d *RPCSignerWalletImpl) BuildChainControl(
 		ChainIO:               walletController,
 		NetParams:             *walletConfig.NetParams,
 		CoinSelectionStrategy: walletConfig.CoinSelectionStrategy,
+		RemoteSignerInformer:  rsInformer,
 	}
 
 	// We've created the wallet configuration now, so we can finish

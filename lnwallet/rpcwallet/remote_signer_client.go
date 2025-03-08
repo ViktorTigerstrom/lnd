@@ -822,16 +822,16 @@ func (r *OutboundClient) process(ctx context.Context,
 
 		return signResp, nil
 
-	case *walletrpc.SignCoordinatorRequest_LocalCommitmentInfo:
+	case *walletrpc.SignCoordinatorRequest_MetadataRequest:
 		err := r.validator.AddMetadata(
-			ctx, reqType.LocalCommitmentInfo.GetFundedPsbt(),
+			ctx, reqType.MetadataRequest,
 		)
 		if err != nil {
 			return nil, err
 		}
 
-		rType := &walletrpc.SignCoordinatorResponse_LocalCommitmentInfoResponse{
-			LocalCommitmentInfoResponse: true,
+		rType := &walletrpc.SignCoordinatorResponse_MetadataReceived{
+			MetadataReceived: true,
 		}
 
 		signResp.SignResponseType = rType

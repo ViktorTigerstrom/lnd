@@ -3,7 +3,11 @@ package validator
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"github.com/lightningnetwork/lnd/clock"
+	"github.com/lightningnetwork/lnd/lnrpc"
+	"github.com/lightningnetwork/lnd/lnrpc/walletrpc"
 	"github.com/lightningnetwork/lnd/sqldb"
 	"github.com/lightningnetwork/lnd/sqldb/sqlc"
 )
@@ -44,6 +48,19 @@ type SQLRemoteSignerQueries interface { //nolint:interfacebloat
 
 	DeleteLocalCommitment(ctx context.Context,
 		arg sqlc.DeleteLocalCommitmentParams) (sql.Result, error)
+
+	InsertKeyDescriptor(ctx context.Context,
+		arg sqlc.InsertKeyDescriptorParams) (int64, error)
+
+	InsertChannelConfig(ctx context.Context,
+		arg sqlc.InsertChannelConfigParams) (int64, error)
+
+	InsertChannelInfo(ctx context.Context,
+		arg sqlc.InsertChannelInfoParams) (int64, error)
+
+	GetChannelInfoWithConfigs(ctx context.Context,
+		arg sqlc.GetChannelInfoWithConfigsParams) (
+		sqlc.GetChannelInfoWithConfigsRow, error)
 }
 
 var _ RemoteSignerDB = (*RemoteSignerSQLStore)(nil)
@@ -294,4 +311,301 @@ func (s *RemoteSignerSQLStore) DeleteLocalCommitment(ctx context.Context,
 	}
 
 	return rows > 0, nil
+}
+
+// AddFundingInfo inserts the FundingInfo (along with its associated key descriptors
+// and channel configurations) into the database in a single transaction.
+func (s *RemoteSignerSQLStore) AddFundingInfo(ctx context.Context,
+	fi *walletrpc.FundingInfo) (uint64, error) {
+
+	var writeTxOpts SQLInvoiceQueriesTxOptions
+	var channelInfoID int64
+
+	err := s.db.ExecTx(ctx, &writeTxOpts, func(db SQLRemoteSignerQueries) error {
+		// --- Local ChannelConfig Insertion ---
+		localCC := fi.GetLocalChannelConfig()
+		if localCC == nil {
+			return errors.New("local channel config missing")
+		}
+
+		// Insert local key descriptors:
+		localMultiSigID, err := db.InsertKeyDescriptor(ctx, sqlc.InsertKeyDescriptorParams{
+			RawKeyBytes: localCC.GetMultiSigKey().GetRawKeyBytes(),
+			KeyFamily:   localCC.GetMultiSigKey().GetKeyLoc().GetKeyFamily(),
+			KeyIndex:    localCC.GetMultiSigKey().GetKeyLoc().GetKeyIndex(),
+		})
+		if err != nil {
+			return fmt.Errorf("insert local multi-sig key: %w", err)
+		}
+
+		localRevocationID, err := db.InsertKeyDescriptor(ctx, sqlc.InsertKeyDescriptorParams{
+			RawKeyBytes: localCC.GetRevocationBasePoint().GetRawKeyBytes(),
+			KeyFamily:   localCC.GetRevocationBasePoint().GetKeyLoc().GetKeyFamily(),
+			KeyIndex:    localCC.GetRevocationBasePoint().GetKeyLoc().GetKeyIndex(),
+		})
+		if err != nil {
+			return fmt.Errorf("insert local revocation key: %w", err)
+		}
+
+		localPaymentID, err := db.InsertKeyDescriptor(ctx, sqlc.InsertKeyDescriptorParams{
+			RawKeyBytes: localCC.GetPaymentBasePoint().GetRawKeyBytes(),
+			KeyFamily:   localCC.GetPaymentBasePoint().GetKeyLoc().GetKeyFamily(),
+			KeyIndex:    localCC.GetPaymentBasePoint().GetKeyLoc().GetKeyIndex(),
+		})
+		if err != nil {
+			return fmt.Errorf("insert local payment key: %w", err)
+		}
+
+		localDelayID, err := db.InsertKeyDescriptor(ctx, sqlc.InsertKeyDescriptorParams{
+			RawKeyBytes: localCC.GetDelayBasePoint().GetRawKeyBytes(),
+			KeyFamily:   localCC.GetDelayBasePoint().GetKeyLoc().GetKeyFamily(),
+			KeyIndex:    localCC.GetDelayBasePoint().GetKeyLoc().GetKeyIndex(),
+		})
+		if err != nil {
+			return fmt.Errorf("insert local delay key: %w", err)
+		}
+
+		localHtlcID, err := db.InsertKeyDescriptor(ctx, sqlc.InsertKeyDescriptorParams{
+			RawKeyBytes: localCC.GetHtlcBasePoint().GetRawKeyBytes(),
+			KeyFamily:   localCC.GetHtlcBasePoint().GetKeyLoc().GetKeyFamily(),
+			KeyIndex:    localCC.GetHtlcBasePoint().GetKeyLoc().GetKeyIndex(),
+		})
+		if err != nil {
+			return fmt.Errorf("insert local HTLC key: %w", err)
+		}
+
+		// Insert the local channel config:
+		localCCID, err := db.InsertChannelConfig(ctx, sqlc.InsertChannelConfigParams{
+			ChanReserveSat:        int64(localCC.GetChannelStateBounds().GetChanReserveSat()),
+			MaxPendingAmtMsat:     int64(localCC.GetChannelStateBounds().GetMaxPendingAmtMsat()),
+			MinHtlc:               int64(localCC.GetChannelStateBounds().GetMinHtlc()),
+			MaxAcceptedHtlcs:      int32(localCC.GetChannelStateBounds().GetMaxAcceptedHtlcs()),
+			DustLimit:             int64(localCC.GetCommitmentParams().GetDustLimit()),
+			CsvDelay:              int32(localCC.GetCommitmentParams().GetCsvDelay()),
+			MultiSigKeyID:         localMultiSigID,
+			RevocationBasePointID: localRevocationID,
+			PaymentBasePointID:    localPaymentID,
+			DelayBasePointID:      localDelayID,
+			HtlcBasePointID:       localHtlcID,
+		})
+		if err != nil {
+			return fmt.Errorf("insert local channel config: %w", err)
+		}
+
+		// --- Remote ChannelConfig Insertion ---
+		remoteCC := fi.GetRemoteChannelConfig()
+		if remoteCC == nil {
+			return errors.New("remote channel config missing")
+		}
+
+		remoteMultiSigID, err := db.InsertKeyDescriptor(ctx, sqlc.InsertKeyDescriptorParams{
+			RawKeyBytes: remoteCC.GetMultiSigKey().GetRawKeyBytes(),
+			KeyFamily:   remoteCC.GetMultiSigKey().GetKeyLoc().GetKeyFamily(),
+			KeyIndex:    remoteCC.GetMultiSigKey().GetKeyLoc().GetKeyIndex(),
+		})
+		if err != nil {
+			return fmt.Errorf("insert remote multi-sig key: %w", err)
+		}
+
+		remoteRevocationID, err := db.InsertKeyDescriptor(ctx, sqlc.InsertKeyDescriptorParams{
+			RawKeyBytes: remoteCC.GetRevocationBasePoint().GetRawKeyBytes(),
+			KeyFamily:   remoteCC.GetRevocationBasePoint().GetKeyLoc().GetKeyFamily(),
+			KeyIndex:    remoteCC.GetRevocationBasePoint().GetKeyLoc().GetKeyIndex(),
+		})
+		if err != nil {
+			return fmt.Errorf("insert remote revocation key: %w", err)
+		}
+
+		remotePaymentID, err := db.InsertKeyDescriptor(ctx, sqlc.InsertKeyDescriptorParams{
+			RawKeyBytes: remoteCC.GetPaymentBasePoint().GetRawKeyBytes(),
+			KeyFamily:   remoteCC.GetPaymentBasePoint().GetKeyLoc().GetKeyFamily(),
+			KeyIndex:    remoteCC.GetPaymentBasePoint().GetKeyLoc().GetKeyIndex(),
+		})
+		if err != nil {
+			return fmt.Errorf("insert remote payment key: %w", err)
+		}
+
+		remoteDelayID, err := db.InsertKeyDescriptor(ctx, sqlc.InsertKeyDescriptorParams{
+			RawKeyBytes: remoteCC.GetDelayBasePoint().GetRawKeyBytes(),
+			KeyFamily:   remoteCC.GetDelayBasePoint().GetKeyLoc().GetKeyFamily(),
+			KeyIndex:    remoteCC.GetDelayBasePoint().GetKeyLoc().GetKeyIndex(),
+		})
+		if err != nil {
+			return fmt.Errorf("insert remote delay key: %w", err)
+		}
+
+		remoteHtlcID, err := db.InsertKeyDescriptor(ctx, sqlc.InsertKeyDescriptorParams{
+			RawKeyBytes: remoteCC.GetHtlcBasePoint().GetRawKeyBytes(),
+			KeyFamily:   remoteCC.GetHtlcBasePoint().GetKeyLoc().GetKeyFamily(),
+			KeyIndex:    remoteCC.GetHtlcBasePoint().GetKeyLoc().GetKeyIndex(),
+		})
+		if err != nil {
+			return fmt.Errorf("insert remote HTLC key: %w", err)
+		}
+
+		remoteCCID, err := db.InsertChannelConfig(ctx, sqlc.InsertChannelConfigParams{
+			ChanReserveSat:        int64(remoteCC.GetChannelStateBounds().GetChanReserveSat()),
+			MaxPendingAmtMsat:     int64(remoteCC.GetChannelStateBounds().GetMaxPendingAmtMsat()),
+			MinHtlc:               int64(remoteCC.GetChannelStateBounds().GetMinHtlc()),
+			MaxAcceptedHtlcs:      int32(remoteCC.GetChannelStateBounds().GetMaxAcceptedHtlcs()),
+			DustLimit:             int64(remoteCC.GetCommitmentParams().GetDustLimit()),
+			CsvDelay:              int32(remoteCC.GetCommitmentParams().GetCsvDelay()),
+			MultiSigKeyID:         remoteMultiSigID,
+			RevocationBasePointID: remoteRevocationID,
+			PaymentBasePointID:    remotePaymentID,
+			DelayBasePointID:      remoteDelayID,
+			HtlcBasePointID:       remoteHtlcID,
+		})
+		if err != nil {
+			return fmt.Errorf("insert remote channel config: %w", err)
+		}
+
+		// --- Insert ChannelInfo ---
+		op := fi.GetFundingOutpoint()
+		channelInfoID, err = db.InsertChannelInfo(ctx, sqlc.InsertChannelInfoParams{
+			TxidBytes:             op.GetTxidBytes(),
+			TxidStr:               op.GetTxidStr(),
+			OutputIndex:           int32(op.GetOutputIndex()),
+			ChannelType:           int64(fi.GetChannelType()),
+			IsLocalInitiator:      fi.GetIsLocalInitiator(),
+			LocalChannelConfigID:  localCCID,
+			RemoteChannelConfigID: remoteCCID,
+			CreatedAt:             s.clock.Now(),
+		})
+		if err != nil {
+			return fmt.Errorf("insert channel info: %w", err)
+		}
+
+		return nil
+	}, func() {
+		// TODO: notify on successful commit if needed.
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	return uint64(channelInfoID), nil
+}
+
+// GetFundingInfo retrieves a FundingInfo object from the database given a channel's
+// txid_bytes and output_index.
+func (s *RemoteSignerSQLStore) GetFundingInfo(ctx context.Context,
+	chanPoint *lnrpc.ChannelPoint) (*walletrpc.FundingInfo, error) {
+
+	row, err := s.db.GetChannelInfoWithConfigs(ctx,
+		sqlc.GetChannelInfoWithConfigsParams{
+			TxidBytes:   chanPoint.GetFundingTxidBytes(),
+			OutputIndex: int32(chanPoint.GetOutputIndex()),
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Map the flat row into a FundingInfo object.
+	fi := &walletrpc.FundingInfo{
+		ChannelType:      uint64(row.ChannelType),
+		IsLocalInitiator: row.IsLocalInitiator,
+		FundingOutpoint: &lnrpc.OutPoint{
+			TxidBytes:   row.TxidBytes,
+			TxidStr:     row.TxidStr,
+			OutputIndex: uint32(row.OutputIndex),
+		},
+		LocalChannelConfig: &lnrpc.ChannelConfig{
+			ChannelStateBounds: &lnrpc.ChannelStateBounds{
+				ChanReserveSat:    uint64(row.LocalChanReserveSat),
+				MaxPendingAmtMsat: uint64(row.LocalMaxPendingAmtMsat),
+				MinHtlc:           uint64(row.LocalMinHtlc),
+				MaxAcceptedHtlcs:  uint32(row.LocalMaxAcceptedHtlcs),
+			},
+			CommitmentParams: &lnrpc.CommitmentParams{
+				DustLimit: uint64(row.LocalDustLimit),
+				CsvDelay:  uint32(row.LocalCsvDelay),
+			},
+			MultiSigKey: &lnrpc.KeyDescriptor{
+				RawKeyBytes: row.LocalMultiSigRawKeyBytes,
+				KeyLoc: &lnrpc.KeyLocator{
+					KeyFamily: row.LocalMultiSigKeyFamily,
+					KeyIndex:  row.LocalMultiSigKeyIndex,
+				},
+			},
+			RevocationBasePoint: &lnrpc.KeyDescriptor{
+				RawKeyBytes: row.LocalRevocationRawKeyBytes,
+				KeyLoc: &lnrpc.KeyLocator{
+					KeyFamily: row.LocalRevocationKeyFamily,
+					KeyIndex:  row.LocalRevocationKeyIndex,
+				},
+			},
+			PaymentBasePoint: &lnrpc.KeyDescriptor{
+				RawKeyBytes: row.LocalPaymentRawKeyBytes,
+				KeyLoc: &lnrpc.KeyLocator{
+					KeyFamily: row.LocalPaymentKeyFamily,
+					KeyIndex:  row.LocalPaymentKeyIndex,
+				},
+			},
+			DelayBasePoint: &lnrpc.KeyDescriptor{
+				RawKeyBytes: row.LocalDelayBasePointRaw,
+				KeyLoc: &lnrpc.KeyLocator{
+					KeyFamily: row.LocalDelayBasePointKeyFamily,
+					KeyIndex:  row.LocalDelayBasePointKeyIndex,
+				},
+			},
+			HtlcBasePoint: &lnrpc.KeyDescriptor{
+				RawKeyBytes: row.LocalHtlcBasePointRaw,
+				KeyLoc: &lnrpc.KeyLocator{
+					KeyFamily: row.LocalHtlcBasePointKeyFamily,
+					KeyIndex:  row.LocalHtlcBasePointKeyIndex,
+				},
+			},
+		},
+		RemoteChannelConfig: &lnrpc.ChannelConfig{
+			ChannelStateBounds: &lnrpc.ChannelStateBounds{
+				ChanReserveSat:    uint64(row.RemoteChanReserveSat),
+				MaxPendingAmtMsat: uint64(row.RemoteMaxPendingAmtMsat),
+				MinHtlc:           uint64(row.RemoteMinHtlc),
+				MaxAcceptedHtlcs:  uint32(row.RemoteMaxAcceptedHtlcs),
+			},
+			CommitmentParams: &lnrpc.CommitmentParams{
+				DustLimit: uint64(row.RemoteDustLimit),
+				CsvDelay:  uint32(row.RemoteCsvDelay),
+			},
+			MultiSigKey: &lnrpc.KeyDescriptor{
+				RawKeyBytes: row.RemoteMultiSigRawKeyBytes,
+				KeyLoc: &lnrpc.KeyLocator{
+					KeyFamily: row.RemoteMultiSigKeyFamily,
+					KeyIndex:  row.RemoteMultiSigKeyIndex,
+				},
+			},
+			RevocationBasePoint: &lnrpc.KeyDescriptor{
+				RawKeyBytes: row.RemoteRevocationRawKeyBytes,
+				KeyLoc: &lnrpc.KeyLocator{
+					KeyFamily: row.RemoteRevocationKeyFamily,
+					KeyIndex:  row.RemoteRevocationKeyIndex,
+				},
+			},
+			PaymentBasePoint: &lnrpc.KeyDescriptor{
+				RawKeyBytes: row.RemotePaymentBasePointRaw,
+				KeyLoc: &lnrpc.KeyLocator{
+					KeyFamily: row.RemotePaymentKeyFamily,
+					KeyIndex:  row.RemotePaymentKeyIndex,
+				},
+			},
+			DelayBasePoint: &lnrpc.KeyDescriptor{
+				RawKeyBytes: row.RemoteDelayBasePointRaw,
+				KeyLoc: &lnrpc.KeyLocator{
+					KeyFamily: row.RemoteDelayBasePointKeyFamily,
+					KeyIndex:  row.RemoteDelayBasePointKeyIndex,
+				},
+			},
+			HtlcBasePoint: &lnrpc.KeyDescriptor{
+				RawKeyBytes: row.RemoteHtlcBasePointRaw,
+				KeyLoc: &lnrpc.KeyLocator{
+					KeyFamily: row.RemoteHtlcBasePointKeyFamily,
+					KeyIndex:  row.RemoteHtlcBasePointKeyIndex,
+				},
+			},
+		},
+	}
+
+	return fi, nil
 }

@@ -6,7 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/lightningnetwork/lnd/channeldb"
 	"github.com/lightningnetwork/lnd/input"
+	"github.com/lightningnetwork/lnd/keychain"
+	"github.com/lightningnetwork/lnd/lnrpc"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -681,9 +684,14 @@ func (s *SignCoordinator) ForwardLocalCommitment(commitTx *wire.MsgTx,
 
 	psbtReq := &walletrpc.SignPsbtRequest{FundedPsbt: buf.Bytes()}
 
-	// TODO: Change this to be actually a metadata informing request.
-	req := &walletrpc.SignCoordinatorRequest_LocalCommitmentInfo{
-		LocalCommitmentInfo: psbtReq,
+	metaData := &walletrpc.MetadataRequest{
+		MetadataType: &walletrpc.MetadataRequest_LocalCommitmentInfo{
+			LocalCommitmentInfo: psbtReq,
+		},
+	}
+
+	req := &walletrpc.SignCoordinatorRequest_MetadataRequest{
+		MetadataRequest: metaData,
 	}
 
 	_, err = processRequest(
@@ -695,7 +703,59 @@ func (s *SignCoordinator) ForwardLocalCommitment(commitTx *wire.MsgTx,
 			}
 		},
 		func(resp *signerResponse) bool {
-			return resp.GetLocalCommitmentInfoResponse()
+			return resp.GetMetadataReceived()
+		},
+	)
+
+	return err
+}
+
+// ForwardFundingInfo sends the information regarding the channel when
+// channel has been funded and has a valid funding outpoint.
+//
+// Note: this is part of the RemoteSignerInformer interface.
+func (s *SignCoordinator) ForwardFundingInfo(fundingPoint *wire.OutPoint,
+	localChanCfg *channeldb.ChannelConfig,
+	remoteChanCfg *channeldb.ChannelConfig,
+	chanType channeldb.ChannelType, isLocalInitiator bool) error {
+
+	fOut := &lnrpc.OutPoint{
+		TxidBytes:   fundingPoint.Hash[:],
+		TxidStr:     fundingPoint.Hash.String(),
+		OutputIndex: fundingPoint.Index,
+	}
+
+	cType := uint64(chanType)
+
+	lChanCfg := marshalChannelConfig(localChanCfg)
+	rChanCfg := marshalChannelConfig(remoteChanCfg)
+
+	fundingInfo := &walletrpc.MetadataRequest_FundingInfo{
+		FundingInfo: &walletrpc.FundingInfo{
+			FundingOutpoint:     fOut,
+			ChannelType:         cType,
+			IsLocalInitiator:    isLocalInitiator,
+			LocalChannelConfig:  lChanCfg,
+			RemoteChannelConfig: rChanCfg,
+		},
+	}
+
+	req := &walletrpc.SignCoordinatorRequest_MetadataRequest{
+		MetadataRequest: &walletrpc.MetadataRequest{
+			MetadataType: fundingInfo,
+		},
+	}
+
+	_, err := processRequest(
+		s, noTimeout,
+		func(reqId uint64) walletrpc.SignCoordinatorRequest {
+			return walletrpc.SignCoordinatorRequest{
+				RequestId:       reqId,
+				SignRequestType: req,
+			}
+		},
+		func(resp *signerResponse) bool {
+			return resp.GetMetadataReceived()
 		},
 	)
 
@@ -938,4 +998,45 @@ func processRequest[R comparable](s *SignCoordinator, timeout time.Duration,
 	}
 
 	return rpcResp, nil
+}
+
+func marshalChannelConfig(
+	chanCfg *channeldb.ChannelConfig) *lnrpc.ChannelConfig {
+
+	descToLnrpc := func(desc keychain.KeyDescriptor) *lnrpc.KeyDescriptor {
+		keyLoc := &lnrpc.KeyLocator{
+			KeyFamily: int32(desc.Family),
+			KeyIndex:  int32(desc.Index),
+		}
+
+		var rawKeyBytes []byte
+		if desc.PubKey != nil {
+			rawKeyBytes = desc.PubKey.SerializeCompressed()
+		}
+
+		return &lnrpc.KeyDescriptor{
+			RawKeyBytes: rawKeyBytes,
+			KeyLoc:      keyLoc,
+		}
+	}
+
+	cCfg := &lnrpc.ChannelConfig{
+		ChannelStateBounds: &lnrpc.ChannelStateBounds{
+			MinHtlc:           uint64(chanCfg.MinHTLC),
+			MaxAcceptedHtlcs:  uint32(chanCfg.MaxAcceptedHtlcs),
+			MaxPendingAmtMsat: uint64(chanCfg.MaxPendingAmount),
+			ChanReserveSat:    uint64(chanCfg.ChanReserve),
+		},
+		CommitmentParams: &lnrpc.CommitmentParams{
+			CsvDelay:  uint32(chanCfg.CsvDelay),
+			DustLimit: uint64(chanCfg.DustLimit),
+		},
+		MultiSigKey:         descToLnrpc(chanCfg.MultiSigKey),
+		RevocationBasePoint: descToLnrpc(chanCfg.RevocationBasePoint),
+		PaymentBasePoint:    descToLnrpc(chanCfg.PaymentBasePoint),
+		DelayBasePoint:      descToLnrpc(chanCfg.DelayBasePoint),
+		HtlcBasePoint:       descToLnrpc(chanCfg.HtlcBasePoint),
+	}
+
+	return cCfg
 }
