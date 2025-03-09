@@ -190,9 +190,10 @@ func (s *subRPCServerConfigs) PopulateDependencies(cfg *Config,
 			subCfgValue.FieldByName("FeeEstimator").Set(
 				reflect.ValueOf(cc.FeeEstimator),
 			)
-			subCfgValue.FieldByName("Wallet").Set(
+
+			/*subCfgValue.FieldByName("Wallet").Set(
 				reflect.ValueOf(cc.Wallet),
-			)
+			)*/
 			subCfgValue.FieldByName("CoinSelectionLocker").Set(
 				reflect.ValueOf(cc.Wallet),
 			)
@@ -205,9 +206,10 @@ func (s *subRPCServerConfigs) PopulateDependencies(cfg *Config,
 			subCfgValue.FieldByName("Chain").Set(
 				reflect.ValueOf(cc.ChainIO),
 			)
-			subCfgValue.FieldByName("ChainParams").Set(
-				reflect.ValueOf(activeNetParams),
-			)
+			/*
+				subCfgValue.FieldByName("ChainParams").Set(
+					reflect.ValueOf(activeNetParams),
+				)*/
 			subCfgValue.FieldByName("CurrentNumAnchorChans").Set(
 				reflect.ValueOf(cc.Wallet.CurrentNumAnchorChans),
 			)
@@ -220,10 +222,10 @@ func (s *subRPCServerConfigs) PopulateDependencies(cfg *Config,
 				reflect.ValueOf(chanStateDB),
 			)
 
-			// The "RemoteSignerConnection" field have already been
-			// added through the PopulateRemoteSignerCfgValues
-			// function, and we therefore don't need to overwrite
-			// them here.
+			// The "Wallet" and "RemoteSignerConnection" fields have
+			// already been added through the
+			// PopulateRemoteSignerCfgValues function, and we
+			// therefore don't need to overwrite them here.
 
 		case *remotesignerrpc.Config:
 			subCfgValue := extractReflectValue(subCfg)
@@ -414,15 +416,23 @@ func (s *subRPCServerConfigs) PopulateDependencies(cfg *Config,
 func (s *subRPCServerConfigs) PopulateRemoteSignerConnectionCfg(cfg *Config,
 	cc *chainreg.ChainControl) error {
 
+	// Extract the WalletKit sub-server config, and populate the config with
+	// the remote signer connection.
+	subCfgValue := extractReflectValue(s.WalletKitRPC)
+
+	subCfgValue.FieldByName("Wallet").Set(
+		reflect.ValueOf(cc.Wallet),
+	)
+
+	subCfgValue.FieldByName("ChainParams").Set(
+		reflect.ValueOf(cfg.ActiveNetParams.Params),
+	)
+
 	// Only populate the WalletKit sub-server with the connection if it's
 	// we allow inbound connections.
 	if !cfg.RemoteSigner.AllowInboundConnection {
 		return nil
 	}
-
-	// Extract the WalletKit sub-server config, and populate the config with
-	// the remote signer connection.
-	subCfgValue := extractReflectValue(s.WalletKitRPC)
 
 	if rpckKeyRing, ok := cc.Wc.(*rpcwallet.RPCKeyRing); ok {
 		conn := reflect.ValueOf(rpckKeyRing.RemoteSignerConnection())

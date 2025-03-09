@@ -2327,6 +2327,10 @@
         "funding_info": {
           "$ref": "#/definitions/walletrpcFundingInfo",
           "description": "Informs the remote signer of information regarding a new channel when\nchannel has been funded and has a valid funding outpoint."
+        },
+        "accounts": {
+          "$ref": "#/definitions/walletrpcListAccountsResponse",
+          "description": "Informs the remote signer of the accounts the watch-only uses."
         }
       }
     },
@@ -2451,6 +2455,10 @@
         "registration_info": {
           "type": "string",
           "description": "Contains information about the watch-only lnd that may be useful for the\nremote signer."
+        },
+        "accounts": {
+          "$ref": "#/definitions/walletrpcListAccountsResponse",
+          "description": "Accounts contains the accounts that the watch-only node uses in the\nwallet."
         }
       }
     },

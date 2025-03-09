@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -23,10 +24,17 @@ import (
 	"github.com/lightningnetwork/lnd/lntypes"
 	"github.com/lightningnetwork/lnd/lnwallet"
 	"github.com/lightningnetwork/lnd/lnwire"
+	"strconv"
+	"strings"
+	"sync"
 
 	"github.com/btcsuite/btcd/btcutil/psbt"
 	"github.com/lightningnetwork/lnd/input"
 	"github.com/lightningnetwork/lnd/lnrpc/walletrpc"
+)
+
+const (
+	HardenedKeyStart = uint32(hdkeychain.HardenedKeyStart)
 )
 
 func ValidateCompatibleConfig(dbCfg *lncfg.DB) error {
@@ -42,6 +50,9 @@ func ValidateCompatibleConfig(dbCfg *lncfg.DB) error {
 type Validator struct {
 	network        *chaincfg.Params
 	remoteSignerDB RemoteSignerDB
+	accounts       []*walletrpc.Account
+
+	mu sync.Mutex
 }
 
 // NewValidator creates a new Validator instance.
@@ -1922,6 +1933,8 @@ func (r *Validator) validateCooperativeClose(ctx context.Context,
 		return nil, err
 	}
 
+	log.Infof("require our output in coop-close: %v", requireOurOutput)
+
 	// If an output was trimmed checks if the to_local output value
 	// in our last commitment tx was above the to_remote value.
 	if len(packet.Outputs) == 1 && requireOurOutput {
@@ -2307,6 +2320,11 @@ func (r *Validator) AddMetadata(ctx context.Context,
 			ctx, reqType.FundingInfo,
 		)
 
+	case *walletrpc.MetadataRequest_Accounts:
+		return r.AddAccountsMetadata(
+			ctx, reqType.Accounts.GetAccounts(),
+		)
+
 	default:
 		// When we don't know the metadata type, we log an error but
 		// return nil, as the watch-only node might be using a newer
@@ -2315,6 +2333,17 @@ func (r *Validator) AddMetadata(ctx context.Context,
 
 		return nil
 	}
+}
+
+func (r *Validator) AddAccountsMetadata(_ context.Context,
+	accounts []*walletrpc.Account) error {
+
+	r.mu.Lock()
+	r.mu.Unlock()
+
+	r.accounts = accounts
+
+	return nil
 }
 
 func (r *Validator) AddFundingMetadata(ctx context.Context,
@@ -2489,6 +2518,26 @@ func (r *Validator) ensureCommitmentIsNotRevoked(ctx context.Context,
 			log.Infof("First time seeing a commitment tx for this "+
 				"Cchannel: %v", chanPoint)
 
+			// Since this is the first time seeing the local
+			// commitment transaction, we insert it into the
+			// database.
+			var buf bytes.Buffer
+			if err = packet.Serialize(&buf); err != nil {
+				return false, fmt.Errorf("error serializing "+
+					"local commitment when seeing it for "+
+					"the first time: %w", err)
+			}
+
+			err = r.remoteSignerDB.InsertLocalCommitment(ctx,
+				buf.Bytes(), chanPoint.GetFundingTxidBytes(),
+				chanPoint.OutputIndex, commitmentHeight,
+			)
+			if err != nil {
+				return false, fmt.Errorf("error inserting "+
+					"local commitment when seeing it for "+
+					"the first time: %w", err)
+			}
+
 			// If it's the first commitment tx, we don't treat the
 			// local commitment as revoked.
 			return true, nil
@@ -2504,15 +2553,14 @@ func (r *Validator) ensureCommitmentIsNotRevoked(ctx context.Context,
 	return true, nil
 }
 
-func (r *Validator) isAddressInternal(key *hdkeychain.ExtendedKey,
-	accountPath []uint32, keysToCheck uint32,
-	matchAddressPkScript []byte) (bool, error) {
+func deriveKey(keyPath []uint32,
+	baseKey *hdkeychain.ExtendedKey) (*hdkeychain.ExtendedKey, error) {
 
-	var currentKey = key
-	for idx, pathPart := range accountPath {
+	var currentKey = baseKey
+	for idx, pathPart := range keyPath {
 		derivedKey, err := currentKey.DeriveNonStandard(pathPart)
 		if err != nil {
-			return false, err
+			return nil, err
 		}
 
 		// There's this special case in lnd's wallet (btcwallet) where
@@ -2527,59 +2575,140 @@ func (r *Validator) isAddressInternal(key *hdkeychain.ExtendedKey,
 		depth := derivedKey.Depth()
 		keyID := pathPart - hdkeychain.HardenedKeyStart
 		nextID := uint32(0)
-		if depth == 2 && len(accountPath) > 2 {
-			nextID = accountPath[idx+1] - hdkeychain.HardenedKeyStart
+		if depth == 2 && len(keyPath) > 2 {
+			nextID = keyPath[idx+1] - hdkeychain.HardenedKeyStart
 		}
 		if (depth == 2 && nextID != 0) || (depth == 3 && keyID != 0) {
 			currentKey, err = hdkeychain.NewKeyFromString(
 				derivedKey.String(),
 			)
 			if err != nil {
-				return false, err
+				return nil, err
 			}
 		} else {
 			currentKey = derivedKey
 		}
 	}
 
+	return currentKey, nil
+}
+
+func (r *Validator) isAddressInternal(key *hdkeychain.ExtendedKey,
+	accountPath []uint32, keysToCheck uint32,
+	matchAddressPkScript []byte) (bool, error) {
+
+	pkScriptMatches := func(addr btcutil.Address) (bool, error) {
+		pkScript, err := txscript.PayToAddrScript(addr)
+		if err != nil {
+			return false, err
+		}
+
+		return bytes.Equal(pkScript, matchAddressPkScript), nil
+	}
+
 	for i := uint32(0); i < keysToCheck; i++ {
-		addrKey, err := currentKey.DeriveNonStandard(i)
-		if err != nil {
-			return false, err
-		}
+		// Check for both the external and internal branch.
+		for _, branch := range []uint32{0, 1} {
+			// Create the path to derive the key.
+			addrPath := append(accountPath, branch, i) //nolint:gocritic
 
-		addrPubKey, err := addrKey.ECPubKey()
-		if err != nil {
-			return false, err
-		}
+			// Derive the key.
+			derivedKey, err := deriveKey(addrPath, key)
+			if err != nil {
+				return false, err
+			}
 
-		pubKeyHash := btcutil.Hash160(addrPubKey.SerializeCompressed())
-		witnessAddr, err := btcutil.NewAddressWitnessPubKeyHash(
-			pubKeyHash, r.network,
-		)
-		if err != nil {
-			return false, err
-		}
+			/*addrKey, err := derivedKey.DeriveNonStandard(i)
+			if err != nil {
+				return false, err
+			}*/
 
-		witnessProgram, err := txscript.PayToAddrScript(witnessAddr)
-		if err != nil {
-			return false, err
-		}
+			addrPubKey, err := derivedKey.ECPubKey()
+			if err != nil {
+				return false, err
+			}
 
-		np2wkhAddr, err := btcutil.NewAddressScriptHash(
-			witnessProgram, r.network,
-		)
-		if err != nil {
-			return false, err
-		}
+			hash160 := btcutil.Hash160(addrPubKey.SerializeCompressed())
+			addrP2PKH, err := btcutil.NewAddressPubKeyHash(
+				hash160, r.network,
+			)
+			if err != nil {
+				return false, fmt.Errorf("could not create address: %w", err)
+			}
 
-		pkScript, err := txscript.PayToAddrScript(np2wkhAddr)
-		if err != nil {
-			return false, err
-		}
+			isMatch, err := pkScriptMatches(addrP2PKH)
+			if err != nil {
+				return false, err
+			}
 
-		if bytes.Equal(pkScript, matchAddressPkScript) {
-			return true, nil
+			if isMatch {
+				return true, nil
+			}
+
+			addrP2WKH, err := btcutil.NewAddressWitnessPubKeyHash(
+				hash160, r.network,
+			)
+			if err != nil {
+				return false, fmt.Errorf("could not create address: %w", err)
+			}
+
+			isMatch, err = pkScriptMatches(addrP2WKH)
+			if err != nil {
+				return false, err
+			}
+
+			if isMatch {
+				return true, nil
+			}
+
+			taprootKey := txscript.ComputeTaprootKeyNoScript(addrPubKey)
+			addrP2TR, err := btcutil.NewAddressTaproot(
+				schnorr.SerializePubKey(taprootKey), r.network,
+			)
+			if err != nil {
+				return false, fmt.Errorf("could not create address: %w", err)
+			}
+
+			isMatch, err = pkScriptMatches(addrP2TR)
+			if err != nil {
+				return false, err
+			}
+
+			if isMatch {
+				return true, nil
+			}
+
+			/*pubKeyHash := btcutil.Hash160(addrPubKey.SerializeCompressed())
+			witnessAddr, err := btcutil.NewAddressWitnessPubKeyHash(
+				pubKeyHash, r.network,
+			)
+			if err != nil {
+				return false, err
+			}*/
+
+			// TODO: This part below has been moved to helper func above
+			/*
+				witnessProgram, err := txscript.PayToAddrScript(witnessAddr)
+				if err != nil {
+					return false, err
+				}
+
+				np2wkhAddr, err := btcutil.NewAddressScriptHash(
+					witnessProgram, r.network,
+				)
+				if err != nil {
+					return false, err
+				}
+
+				pkScript, err := txscript.PayToAddrScript(np2wkhAddr)
+				if err != nil {
+					return false, err
+				}
+
+				if bytes.Equal(pkScript, matchAddressPkScript) {
+					return true, nil
+				}
+			*/
 		}
 	}
 
@@ -2600,19 +2729,53 @@ func (r *Validator) isOurOutput(ctx context.Context, packet *psbt.Packet,
 		return true, nil
 	}
 
-	//TODO:! Remove
-	log.Infof("Returning true for if output is internal")
-	return true, nil
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
-	isInternal, err := r.isAddressInternal(
-		nil, nil, 10000,
-		packet.UnsignedTx.TxOut[outputIndex].PkScript,
-	)
-	if err != nil {
-		return false, err
+	for _, account := range r.accounts {
+		parsedPath, err := ParsePath(account.GetDerivationPath())
+		if err != nil {
+			return false, err
+		}
+
+		log.Infof("parsedPath is %v", parsedPath)
+
+		log.Infof("reseting parsedPath")
+		parsedPath = make([]uint32, 0)
+
+		xKey, err := hdkeychain.NewKeyFromString(
+			account.GetExtendedPublicKey(),
+		)
+		if err != nil {
+			return false, err
+		}
+
+		keyCount := account.GetExternalKeyCount()
+		if account.GetInternalKeyCount() > account.GetExternalKeyCount() {
+			keyCount = account.GetInternalKeyCount()
+		}
+
+		isInternal, err := r.isAddressInternal(
+			xKey, parsedPath, 1000+keyCount,
+			packet.UnsignedTx.TxOut[outputIndex].PkScript,
+		)
+		if err != nil {
+			return false, err
+		}
+
+		if isInternal {
+			log.Infof("!!!! FOUND INTERNAL ADDRESS")
+
+			return true, nil
+		}
+
 	}
 
-	return isInternal, nil
+	log.Infof("!!!! DID NOT!!! FIND INTERNAL ADDRESS")
+	//TODO: remote this return
+	return true, nil
+
+	return false, nil
 }
 
 // isOurOutput checks if the output address at the specified index is
@@ -2624,6 +2787,11 @@ func (r *Validator) isWhiteListedAddress(ctx context.Context,
 
 	addresses, err := r.remoteSignerDB.ListWhitelistedAddresses(ctx)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// No whitelisted payment hash found.
+			return false, nil
+		}
+
 		return false, err
 	}
 
@@ -2635,13 +2803,42 @@ func (r *Validator) isWhiteListedAddress(ctx context.Context,
 		}
 
 		if bytes.Equal(addr.ScriptAddress(), outputScript) {
-			log.Debugf("address %s, is whitelisted", address)
+			log.Infof("!!!!! address %s, is whitelisted", address)
 
 			return true, nil
 		}
 	}
 
+	log.Infof("!!!!! address was not whitelisted")
+
 	return false, nil
+}
+
+func ParsePath(path string) ([]uint32, error) {
+	path = strings.TrimSpace(path)
+	if len(path) == 0 {
+		return nil, errors.New("path cannot be empty")
+	}
+	if !strings.HasPrefix(path, "m/") {
+		return nil, errors.New("path must start with m/")
+	}
+	parts := strings.Split(path, "/")
+	indices := make([]uint32, len(parts)-1)
+	for i := 1; i < len(parts); i++ {
+		index := uint32(0)
+		part := parts[i]
+		if strings.Contains(parts[i], "'") {
+			index += HardenedKeyStart
+			part = strings.TrimRight(parts[i], "'")
+		}
+		parsed, err := strconv.Atoi(part)
+		if err != nil {
+			return nil, fmt.Errorf("could not parse part \"%s\": "+
+				"%v", part, err)
+		}
+		indices[i-1] = index + uint32(parsed)
+	}
+	return indices, nil
 }
 
 // A compile time assertion to ensure Validator meets the Validation interface.

@@ -547,6 +547,29 @@ func (r *OutboundClient) handshake(ctx context.Context, stream *Stream) error {
 	case *completeType:
 		// TODO(viktor): This should verify that the signature in the
 		// complete message is valid.
+
+		switch wType := rType.RegistrationComplete.
+			GetWalletInfo().(type) {
+
+		case *walletrpc.RegistrationComplete_Accounts:
+
+			acctMetaData := &walletrpc.MetadataRequest_Accounts{
+				Accounts: wType.Accounts,
+			}
+
+			metaData := &walletrpc.MetadataRequest{
+				MetadataType: acctMetaData,
+			}
+
+			err := r.validator.AddMetadata(ctx, metaData)
+			if err != nil {
+				return fmt.Errorf("adding account metadata "+
+					"error: %v", err)
+			}
+
+		default:
+
+		}
 		return nil
 
 	// An error occurred during the registration process.

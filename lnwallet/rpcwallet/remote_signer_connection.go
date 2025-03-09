@@ -297,7 +297,8 @@ type InboundRemoteSignerConnection interface {
 	// stream set up by an outbound remote signer and then blocks until the
 	// stream is closed. Lnd can then send any requests to the remote signer
 	// through the stream.
-	AddConnection(stream StreamServer) error
+	AddConnection(stream StreamServer,
+		getAccounts func() ([]*walletrpc.Account, error)) error
 }
 
 // InboundConnection is an abstraction that manages the inbound connection that
@@ -374,8 +375,10 @@ func (r *InboundConnection) Ping(_ context.Context,
 // stream.
 //
 // NOTE: This is part of the InboundRemoteSignerConnection interface.
-func (r *InboundConnection) AddConnection(stream StreamServer) error {
-	return r.SignCoordinator.Run(stream)
+func (r *InboundConnection) AddConnection(stream StreamServer,
+	getAccounts func() ([]*walletrpc.Account, error)) error {
+
+	return r.SignCoordinator.Run(stream, getAccounts)
 }
 
 // A compile time assertion to ensure InboundConnection meets the

@@ -546,6 +546,11 @@ message MetadataRequest {
         channel has been funded and has a valid funding outpoint.
         */
         FundingInfo funding_info = 2;
+
+        /*
+        Informs the remote signer of the accounts the watch-only uses.
+        */
+        ListAccountsResponse accounts = 3;
     }
 }
 
@@ -628,6 +633,18 @@ message RegistrationComplete {
     remote signer.
     */
     string registration_info = 2;
+
+    /*
+    Wallet info contains information about the wallet that the remote signer
+    has connected to.
+     */
+    oneof wallet_info {
+        /*
+        Accounts contains the accounts that the watch-only node uses in the
+        wallet.
+         */
+        ListAccountsResponse accounts = 3;
+    }
 }
 
 message ListUnspentRequest {
