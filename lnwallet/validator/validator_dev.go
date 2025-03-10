@@ -1056,28 +1056,28 @@ func (r *Validator) extractChannelPartyOutputMetadata(
 					"points found in channel party output")
 			}
 
-			fCommitPoint = true
-
 			commitP, err := secp256k1.ParsePubKey(unknown.Value)
 			if err != nil {
 				return nil, err
 			}
 
+			fCommitPoint = true
 			commitPoint = commitP
+
 		case bytes.Equal(k, input.PsbtKeyTypeOutputCsvDelay):
 			if fCsvDelay {
 				return nil, fmt.Errorf("multiple csv delays " +
 					"found in channel party output")
 			}
 
-			fCsvDelay = true
-
 			delay, err := input.BytesToUint32(unknown.Value)
 			if err != nil {
 				return nil, err
 			}
 
+			fCsvDelay = true
 			csvDelay = delay
+
 		case bytes.Equal(k, input.PsbtKeyTypeOutputLeaseExpiry):
 			if fLeaseExpiry {
 				return nil, fmt.Errorf("multiple lease " +
@@ -1085,13 +1085,12 @@ func (r *Validator) extractChannelPartyOutputMetadata(
 					"output")
 			}
 
-			fLeaseExpiry = true
-
 			expiry, err := input.BytesToUint32(unknown.Value)
 			if err != nil {
 				return nil, err
 			}
 
+			fLeaseExpiry = true
 			leaseExpiry = expiry
 		}
 	}
@@ -1127,13 +1126,12 @@ func (r *Validator) extractHTLCOutputMetadata(
 					"points found in HTLC output")
 			}
 
-			fCommitPoint = true
-
 			commitP, err := secp256k1.ParsePubKey(unknown.Value)
 			if err != nil {
 				return nil, err
 			}
 
+			fCommitPoint = true
 			commitPoint = commitP
 
 		case bytes.Equal(k, input.PsbtKeyTypeOutputCltvExpiry):
@@ -1142,13 +1140,12 @@ func (r *Validator) extractHTLCOutputMetadata(
 					"expiries found in HTLC output")
 			}
 
-			fCltvExpiry = true
-
 			expiry, err := input.BytesToUint32(unknown.Value)
 			if err != nil {
 				return nil, err
 			}
 
+			fCltvExpiry = true
 			cltvExpiry = expiry
 
 		case bytes.Equal(k, input.PsbtKeyTypeOutputRHash):
@@ -1157,13 +1154,12 @@ func (r *Validator) extractHTLCOutputMetadata(
 					"found in HTLC output")
 			}
 
-			fRHash = true
-
 			if len(unknown.Value) != 32 {
 				return nil, fmt.Errorf("r hash in metadata " +
 					"is not 32 bytes")
 			}
 
+			fRHash = true
 			copy(rHash[:], unknown.Value)
 		}
 	}
@@ -1195,13 +1191,12 @@ func (r *Validator) extractAnchorOutputMetadata(
 					"points found in anchor output")
 			}
 
-			fCommitPoint = true
-
 			commitP, err := secp256k1.ParsePubKey(unknown.Value)
 			if err != nil {
 				return nil, err
 			}
 
+			fCommitPoint = true
 			commitPoint = commitP
 		}
 	}
@@ -1238,8 +1233,6 @@ func (r *Validator) extractSecondLevelHTLCOutputMetadata(
 					"output")
 			}
 
-			fFundingOutpoint = true
-
 			outpointStr := string(unknown.Value)
 
 			outpoint, err := wire.NewOutPointFromString(outpointStr)
@@ -1247,7 +1240,9 @@ func (r *Validator) extractSecondLevelHTLCOutputMetadata(
 				return nil, err
 			}
 
+			fFundingOutpoint = true
 			fundingOutpoint = outpoint
+
 		case bytes.Equal(k, input.PsbtKeyTypeOutputCommitPoint):
 			if fCommitPoint {
 				return nil, fmt.Errorf("multiple commit " +
@@ -1255,13 +1250,12 @@ func (r *Validator) extractSecondLevelHTLCOutputMetadata(
 					"output")
 			}
 
-			fCommitPoint = true
-
 			commitP, err := secp256k1.ParsePubKey(unknown.Value)
 			if err != nil {
 				return nil, err
 			}
 
+			fCommitPoint = true
 			commitPoint = commitP
 
 		case bytes.Equal(k, input.PsbtKeyTypeOutputCsvDelay):
@@ -1286,13 +1280,12 @@ func (r *Validator) extractSecondLevelHTLCOutputMetadata(
 					"output")
 			}
 
-			fLeaseExpiry = true
-
 			expiry, err := input.BytesToUint32(unknown.Value)
 			if err != nil {
 				return nil, err
 			}
 
+			fLeaseExpiry = true
 			leaseExpiry = expiry
 		}
 	}
@@ -2516,7 +2509,7 @@ func (r *Validator) ensureCommitmentIsNotRevoked(ctx context.Context,
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			log.Infof("First time seeing a commitment tx for this "+
-				"Cchannel: %v", chanPoint)
+				"Channel: %v", chanPoint)
 
 			// Since this is the first time seeing the local
 			// commitment transaction, we insert it into the
