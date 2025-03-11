@@ -106,6 +106,7 @@ func (r *Validator) ValidatePSBT(ctx context.Context,
 		return r.validateRemoteSecondLevelHTLCTx(ctx, packet)
 
 	case Unknown:
+		// TODO: use validateLocalSecondLevelHTLCTx
 		return r.validateDefaultTransaction(ctx, packet)
 
 	default:
@@ -574,6 +575,11 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 
 	log.Infof("This is a Remote Commitment transaction.")
 
+	if len(packet.Outputs) != len(packet.UnsignedTx.TxOut) {
+		return nil, fmt.Errorf("packet Output and " +
+			"packet.UnsignedTx.TxOut differs in length")
+	}
+
 	if packet.UnsignedTx != nil && len(packet.UnsignedTx.TxIn) != 1 {
 		return nil, fmt.Errorf("expected 1 input for commitment "+""+
 			"transaction for packet: %v", packet)
@@ -640,7 +646,6 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 				return nil, err
 			}
 
-			// TODO: Needs to be correct byte arrays being matched.
 			scriptMatches := bytes.Equal(
 				toLocalScript.PkScript(),
 				packet.UnsignedTx.TxOut[i].PkScript,
@@ -650,14 +655,11 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 				log.Errorf("Remote commitment script does not match " +
 					"for to_local output")
 
-				// TODO: Comment back
-				/*
-					failRes := ValidationFailureResult("output script " +
-						"not matching for to_local output in " +
-						"remote commitment transaction")
-					return failRes, nil
+				failRes := ValidationFailureResult("output script " +
+					"not matching for to_local output in " +
+					"remote commitment transaction")
 
-				*/
+				return failRes, nil
 			} else {
 				log.Infof("!!!! Remote commitment script matches for to_local " +
 					"output")
@@ -699,7 +701,6 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 				return nil, err
 			}
 
-			// TODO: Needs to be correct byte arrays being matched.
 			scriptMatches := bytes.Equal(
 				toRemoteScript.PkScript(),
 				packet.UnsignedTx.TxOut[i].PkScript,
@@ -709,14 +710,11 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 				log.Errorf("Remote commitment script does not " +
 					"match for to_remote output")
 
-				// TODO: Comment back
-				/*
-					failRes := ValidationFailureResult("output script " +
-						"not matching for to_remote output in " +
-						"remote commitment transaction")
-					return failRes, nil
+				failRes := ValidationFailureResult("output script " +
+					"not matching for to_remote output in " +
+					"remote commitment transaction")
 
-				*/
+				return failRes, nil
 			} else {
 				log.Infof("!!!! Remote commitment script matches for to_remote " +
 					"output")
@@ -752,7 +750,6 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 				return nil, err
 			}
 
-			// TODO: Needs to be correct byte arrays being matched.
 			scriptMatches := bytes.Equal(
 				htlcScriptInfo.PkScript(),
 				packet.UnsignedTx.TxOut[i].PkScript,
@@ -762,14 +759,11 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 				log.Errorf("Remote commitment script does not " +
 					"match for incoming HTLC output")
 
-				// TODO: Comment back
-				/*
-					failRes := ValidationFailureResult("output script " +
-						"not matching for incoming HTLC output in " +
-						"remote commitment transaction")
-					return failRes, nil
+				failRes := ValidationFailureResult("output script " +
+					"not matching for incoming HTLC output in " +
+					"remote commitment transaction")
 
-				*/
+				return failRes, nil
 			} else {
 				log.Infof("!!!! Remote commitment script matches for incoming HTLC " +
 					"output")
@@ -795,14 +789,11 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 					"remote commitment transaction: %v",
 					htlcMetadata.RHash)
 
-				// TODO: Comment back
-				/*
-					failRes := ValidationFailureResult("Found non " +
-						"whitelisted HTLC in " +
-						"remote commitment transaction")
-					return failRes, nil
+				failRes := ValidationFailureResult("Found non " +
+					"whitelisted HTLC in " +
+					"remote commitment transaction")
 
-				*/
+				return failRes, nil
 			} else {
 				log.Infof("!!!! Whitelisted HTLC found in remote " +
 					"commitment transaction")
@@ -830,7 +821,6 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 				return nil, err
 			}
 
-			// TODO: Needs to be correct byte arrays being matched.
 			scriptMatches := bytes.Equal(
 				htlcScriptInfo.PkScript(),
 				packet.UnsignedTx.TxOut[i].PkScript,
@@ -840,14 +830,11 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 				log.Errorf("Remote commitment script does not " +
 					"match for incoming HTLC output")
 
-				// TODO: Comment back
-				/*
-					failRes := ValidationFailureResult("output script " +
-						"not matching for incoming HTLC output in " +
-						"remote commitment transaction")
-					return failRes, nil
+				failRes := ValidationFailureResult("output script " +
+					"not matching for incoming HTLC output in " +
+					"remote commitment transaction")
 
-				*/
+				return failRes, nil
 			} else {
 				log.Infof("!!!! Remote commitment script matches for offered HTLC " +
 					"output")
@@ -886,7 +873,6 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 				return nil, err
 			}
 
-			// TODO: Needs to be correct byte arrays being matched.
 			scriptMatches := bytes.Equal(
 				remoteAnchor.PkScript(),
 				packet.UnsignedTx.TxOut[i].PkScript,
@@ -896,14 +882,11 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 				log.Errorf("Remote commitment script does not " +
 					"match for local anchor output")
 
-				// TODO: Comment back
-				/*
-					failRes := ValidationFailureResult("output script " +
-						"not matching for local anchor output in " +
-						"remote commitment transaction")
-					return failRes, nil
+				failRes := ValidationFailureResult("output script " +
+					"not matching for local anchor output in " +
+					"remote commitment transaction")
 
-				*/
+				return failRes, nil
 			} else {
 				log.Infof("!!!! Remote commitment script matches for local anchor " +
 					"output")
@@ -942,7 +925,6 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 				return nil, err
 			}
 
-			// TODO: Needs to be correct byte arrays being matched.
 			scriptMatches := bytes.Equal(
 				localAnchor.PkScript(),
 				packet.UnsignedTx.TxOut[i].PkScript,
@@ -952,14 +934,11 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 				log.Errorf("Remote commitment script does not " +
 					"match for remote anchor output")
 
-				// TODO: Comment back
-				/*
-					failRes := ValidationFailureResult("output script " +
-						"not matching for remote anchor output in " +
-						"remote commitment transaction")
-					return failRes, nil
+				failRes := ValidationFailureResult("output script " +
+					"not matching for remote anchor output in " +
+					"remote commitment transaction")
 
-				*/
+				return failRes, nil
 			} else {
 				log.Infof("!!!! Remote commitment script matches for remote anchor " +
 					"output")
@@ -1503,6 +1482,11 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 			"transaction")
 	}
 
+	if len(packet.Outputs) != len(packet.UnsignedTx.TxOut) {
+		return nil, fmt.Errorf("packet Output and " +
+			"packet.UnsignedTx.TxOut differs in length")
+	}
+
 	if packet.UnsignedTx != nil && len(packet.UnsignedTx.TxIn) != 1 {
 		return nil, fmt.Errorf("expected 1 input for commitment "+""+
 			"transaction for packet: %v", packet)
@@ -1569,7 +1553,6 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 				return nil, err
 			}
 
-			// TODO: Needs to be correct byte arrays being matched.
 			scriptMatches := bytes.Equal(
 				toLocalScript.PkScript(),
 				packet.UnsignedTx.TxOut[i].PkScript,
@@ -1579,14 +1562,11 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 				log.Errorf("Local commitment script does not match " +
 					"for to_local output")
 
-				// TODO: Comment back
-				/*
-					failRes := ValidationFailureResult("output script " +
-						"not matching for to_local output in " +
-						"local commitment transaction")
-					return failRes, nil
+				failRes := ValidationFailureResult("output script " +
+					"not matching for to_local output in " +
+					"local commitment transaction")
 
-				*/
+				return failRes, nil
 			} else {
 				log.Infof("!!!! Local commitment script matches for to_local " +
 					"output")
@@ -1628,7 +1608,6 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 				return nil, err
 			}
 
-			// TODO: Needs to be correct byte arrays being matched.
 			scriptMatches := bytes.Equal(
 				toRemoteScript.PkScript(),
 				packet.UnsignedTx.TxOut[i].PkScript,
@@ -1638,14 +1617,11 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 				log.Errorf("Local commitment script does not " +
 					"match for to_remote output")
 
-				// TODO: Comment back
-				/*
-					failRes := ValidationFailureResult("output script " +
-						"not matching for to_remote output in " +
-						"local commitment transaction")
-					return failRes, nil
+				failRes := ValidationFailureResult("output script " +
+					"not matching for to_remote output in " +
+					"local commitment transaction")
 
-				*/
+				return failRes, nil
 			} else {
 				log.Infof("!!!! Local commitment script matches for to_remote " +
 					"output")
@@ -1681,7 +1657,6 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 				return nil, err
 			}
 
-			// TODO: Needs to be correct byte arrays being matched.
 			scriptMatches := bytes.Equal(
 				htlcScriptInfo.PkScript(),
 				packet.UnsignedTx.TxOut[i].PkScript,
@@ -1691,14 +1666,11 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 				log.Errorf("Local commitment script does not " +
 					"match for incoming HTLC output")
 
-				// TODO: Comment back
-				/*
-					failRes := ValidationFailureResult("output script " +
-						"not matching for incoming HTLC output in " +
-						"local commitment transaction")
-					return failRes, nil
+				failRes := ValidationFailureResult("output script " +
+					"not matching for incoming HTLC output in " +
+					"local commitment transaction")
 
-				*/
+				return failRes, nil
 			} else {
 				log.Infof("!!!! Local commitment script matches for incoming HTLC " +
 					"output")
@@ -1724,16 +1696,13 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 					"local commitment transaction: %v",
 					htlcMetadata.RHash)
 
-				// TODO: Comment back
-				/*
-					failRes := ValidationFailureResult("Found non " +
-						"whitelisted HTLC in " +
-						"local commitment transaction")
-					return failRes, nil
+				failRes := ValidationFailureResult("Found non " +
+					"whitelisted HTLC in " +
+					"local commitment transaction")
 
-				*/
+				return failRes, nil
 			} else {
-				log.Infof("!!!! Whitelisted HTLC found in remote " +
+				log.Infof("!!!! Whitelisted HTLC found in local " +
 					"commitment transaction")
 			}
 
@@ -1759,7 +1728,6 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 				return nil, err
 			}
 
-			// TODO: Needs to be correct byte arrays being matched.
 			scriptMatches := bytes.Equal(
 				htlcScriptInfo.PkScript(),
 				packet.UnsignedTx.TxOut[i].PkScript,
@@ -1769,14 +1737,11 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 				log.Errorf("Local commitment script does not " +
 					"match for offered HTLC output")
 
-				// TODO: Comment back
-				/*
-					failRes := ValidationFailureResult("output script " +
-						"not matching for offered HTLC output in " +
-						"local commitment transaction")
-					return failRes, nil
+				failRes := ValidationFailureResult("output script " +
+					"not matching for offered HTLC output in " +
+					"local commitment transaction")
 
-				*/
+				return failRes, nil
 			} else {
 				log.Infof("!!!! Local commitment script matches for offered HTLC " +
 					"output")
@@ -1815,7 +1780,6 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 				return nil, err
 			}
 
-			// TODO: Needs to be correct byte arrays being matched.
 			scriptMatches := bytes.Equal(
 				localAnchor.PkScript(),
 				packet.UnsignedTx.TxOut[i].PkScript,
@@ -1825,14 +1789,10 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 				log.Errorf("Local commitment script does not " +
 					"match for local anchor output")
 
-				// TODO: Comment back
-				/*
-					failRes := ValidationFailureResult("output script " +
-						"not matching for local anchor output in " +
-						"local commitment transaction")
-					return failRes, nil
-
-				*/
+				failRes := ValidationFailureResult("output script " +
+					"not matching for local anchor output in " +
+					"local commitment transaction")
+				return failRes, nil
 			} else {
 				log.Infof("!!!! Local commitment script matches for local anchor " +
 					"output")
@@ -1871,7 +1831,6 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 				return nil, err
 			}
 
-			// TODO: Needs to be correct byte arrays being matched.
 			scriptMatches := bytes.Equal(
 				remoteAnchor.PkScript(),
 				packet.UnsignedTx.TxOut[i].PkScript,
@@ -1881,14 +1840,11 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 				log.Errorf("Local commitment script does not " +
 					"match for remote anchor output")
 
-				// TODO: Comment back
-				/*
-					failRes := ValidationFailureResult("output script " +
-						"not matching for remote anchor output in " +
-						"local commitment transaction")
-					return failRes, nil
+				failRes := ValidationFailureResult("output script " +
+					"not matching for remote anchor output in " +
+					"local commitment transaction")
 
-				*/
+				return failRes, nil
 			} else {
 				log.Infof("!!!! Local commitment script matches for remote anchor " +
 					"output")
@@ -1907,6 +1863,11 @@ func (r *Validator) validateCooperativeClose(ctx context.Context,
 	packet *psbt.Packet) (*ValidationResult, error) {
 
 	log.Infof("This is a Cooperative Close transaction.")
+
+	if len(packet.Outputs) != len(packet.UnsignedTx.TxOut) {
+		return nil, fmt.Errorf("packet Output and " +
+			"packet.UnsignedTx.TxOut differs in length")
+	}
 
 	// Option 2:
 	// We ignore checking the remote output, and instead only check
@@ -1930,7 +1891,7 @@ func (r *Validator) validateCooperativeClose(ctx context.Context,
 
 	// If an output was trimmed checks if the to_local output value
 	// in our last commitment tx was above the to_remote value.
-	if len(packet.Outputs) == 1 && requireOurOutput {
+	if len(packet.Outputs) == 1 && !requireOurOutput {
 		// If not we won't require that a local output exists in
 		// the closing tx.
 		return ValidationSuccessResult(), nil
@@ -1941,16 +1902,19 @@ func (r *Validator) validateCooperativeClose(ctx context.Context,
 	// an internal address, or a whitelisted address (a delivery address has
 	// been set for the channel).
 	for oIndex, _ := range packet.Outputs {
-		isOurInput, err := r.isOurOutput(ctx, packet, oIndex)
+		isOurInput, err := r.isOurOutput(
+			ctx, packet.UnsignedTx.TxOut[oIndex].PkScript,
+		)
 		if err != nil {
 			return nil, err
 		}
 
 		if isOurInput {
 			// Found the local output.
+			log.Infof("Found our output in cooperative close")
+
 			return ValidationSuccessResult(), nil
 		}
-
 	}
 
 	res := ValidationFailureResult("Could not find local "+
@@ -2016,19 +1980,31 @@ func (r *Validator) requireOurOutputInCoopClose(ctx context.Context,
 func (r *Validator) validateLocalSecondLevelHTLCTx(ctx context.Context,
 	packet *psbt.Packet) (*ValidationResult, error) {
 
-	log.Infof("This is a second level HTLC transaction.")
+	log.Infof("This is a local second level HTLC transaction.")
 
 	var (
 		sloFound bool
 	)
 
+	if len(packet.Outputs) != len(packet.UnsignedTx.TxOut) {
+		return nil, fmt.Errorf("packet Output and " +
+			"packet.UnsignedTx.TxOut differs in length")
+	}
+
+	log.Infof("Packet output length is: %d", len(packet.Outputs))
+	log.Infof("Transaction output length is: %d", len(packet.UnsignedTx.TxOut))
+	log.Infof("Transaction input length is: %d", len(packet.UnsignedTx.TxIn))
+
 	for outputIndex, output := range packet.Outputs {
-		if len(output.Unknowns) <= 0 {
+		/*if len(output.Unknowns) <= 0 {
 			return nil, fmt.Errorf("second level transaction " +
 				"outputs should have metadata attached")
-		}
+		}*/
 
-		k := output.Unknowns[0].Key
+		k := input.PsbtKeyDefaultTransaction
+		if len(output.Unknowns) > 0 {
+			k = output.Unknowns[0].Key
+		}
 
 		switch {
 		case bytes.Equal(k, input.PsbtKeyOutputTypeSecondLevelHTLC):
@@ -2081,7 +2057,6 @@ func (r *Validator) validateLocalSecondLevelHTLCTx(ctx context.Context,
 				return nil, err
 			}
 
-			// TODO: Needs to be correct byte arrays being matched.
 			scriptMatches := bytes.Equal(
 				secondLevelScript.PkScript(),
 				packet.UnsignedTx.TxOut[outputIndex].PkScript,
@@ -2091,14 +2066,11 @@ func (r *Validator) validateLocalSecondLevelHTLCTx(ctx context.Context,
 				log.Errorf("Second level HTLC output script does not " +
 					"match for local second level HTLC tx")
 
-				// TODO: Comment back
-				/*
-					failRes := ValidationFailureResult("output script " +
-						"not matching for Second level HTLC output  in " +
-						"local second level HTLC transaction")
-					return failRes, nil
+				failRes := ValidationFailureResult("output script " +
+					"not matching for Second level HTLC output  in " +
+					"local second level HTLC transaction")
 
-				*/
+				return failRes, nil
 			} else {
 				log.Infof("!!!! Second level HTLC output script matches")
 			}
@@ -2107,7 +2079,8 @@ func (r *Validator) validateLocalSecondLevelHTLCTx(ctx context.Context,
 			// All other outputs must be either internal or
 			// whitelisted
 			isOurOutput, err := r.isOurOutput(
-				ctx, packet, outputIndex,
+				ctx,
+				packet.UnsignedTx.TxOut[outputIndex].PkScript,
 			)
 			if err != nil {
 				return nil, err
@@ -2117,30 +2090,27 @@ func (r *Validator) validateLocalSecondLevelHTLCTx(ctx context.Context,
 				log.Errorf("Output in Second level HTLC " +
 					"transaction isn't our output")
 
-				// TODO: Comment back
-				/*
-					failRes := ValidationFailureResult("output script " +
-						"not matching for Second level HTLC output  in " +
-						"local second level HTLC transaction")
-					return failRes, nil
+				failRes := ValidationFailureResult("output script " +
+					"not matching for Second level HTLC output  in " +
+					"local second level HTLC transaction")
 
-				*/
+				return failRes, nil
+			} else {
+				log.Infof("!!!! Found our address in second " +
+					"level HTLC tx")
 			}
 		}
 
 	}
 
-	if !sloFound {
+	/*if !sloFound {
 		log.Errorf("Did not find second level HTLC output")
 
-		// TODO: Comment back
-		/*
-			failRes := ValidationFailureResult("Did not find " +
-				"second level HTLC output")
-			return failRes, nil
+		failRes := ValidationFailureResult("Did not find " +
+			"second level HTLC output")
 
-		*/
-	}
+		return failRes, nil
+	}*/
 
 	return ValidationSuccessResult(), nil
 }
@@ -2148,20 +2118,25 @@ func (r *Validator) validateLocalSecondLevelHTLCTx(ctx context.Context,
 func (r *Validator) validateRemoteSecondLevelHTLCTx(ctx context.Context,
 	packet *psbt.Packet) (*ValidationResult, error) {
 
-	log.Infof("This is a second level HTLC transaction.")
+	log.Infof("This is a remote second level HTLC transaction.")
 
-	if len(packet.Outputs) != 1 {
-		log.Errorf("Remote second level HTLC transaction MUST contain " +
-			"exactly one output when signed by us.")
+	log.Infof("Packet output length is: %d", len(packet.Outputs))
+	log.Infof("Transaction output length is: %d", len(packet.UnsignedTx.TxOut))
+	log.Infof("Transaction input length is: %d", len(packet.UnsignedTx.TxIn))
 
-		/*failRes := ValidationFailureResult("Remote second level HTLC " +
-			"transaction MUST contain exactly one output when " +
-			"signed by us")
+	if len(packet.Outputs) != len(packet.UnsignedTx.TxOut) {
+		return nil, fmt.Errorf("packet Output and " +
+			"packet.UnsignedTx.TxOut differs in length")
+	}
 
-		return failRes, nil*/
+	if len(packet.Outputs) != 1 && len(packet.Inputs) != 1 {
+		err := fmt.Errorf("Remote second level HTLC transaction MUST " +
+			"contain exactly one input and output when signed by " +
+			"us.")
 
-		//TODO:! REMOVE
-		return ValidationSuccessResult(), nil
+		log.Error(err)
+
+		return nil, err
 	}
 
 	output := packet.Outputs[0]
@@ -2181,9 +2156,7 @@ func (r *Validator) validateRemoteSecondLevelHTLCTx(ctx context.Context,
 		output.Unknowns[1:],
 	)
 	if err != nil {
-		//TODO:! REMOVE
-		log.Infof("error extracting second level metadata: %v", err)
-		return ValidationSuccessResult(), nil
+		log.Errorf("error extracting second level metadata: %v", err)
 
 		return nil, err
 	}
@@ -2219,7 +2192,6 @@ func (r *Validator) validateRemoteSecondLevelHTLCTx(ctx context.Context,
 		return nil, err
 	}
 
-	// TODO: Needs to be correct byte arrays being matched.
 	scriptMatches := bytes.Equal(
 		secondLevelScript.PkScript(),
 		packet.UnsignedTx.TxOut[0].PkScript,
@@ -2229,14 +2201,11 @@ func (r *Validator) validateRemoteSecondLevelHTLCTx(ctx context.Context,
 		log.Errorf("Second level HTLC output script does not " +
 			"match for local second level HTLC tx")
 
-		// TODO: Comment back
-		/*
-			failRes := ValidationFailureResult("output script " +
-				"not matching for Second level HTLC output  in " +
-				"local second level HTLC transaction")
-			return failRes, nil
+		failRes := ValidationFailureResult("output script " +
+			"not matching for Second level HTLC output  in " +
+			"local second level HTLC transaction")
 
-		*/
+		return failRes, nil
 	} else {
 		log.Infof("!!!! Second level HTLC output script matches")
 	}
@@ -2262,11 +2231,15 @@ func (r *Validator) validateDefaultTransaction(ctx context.Context,
 
 	log.Infof("This is a default transaction.")
 
+	log.Infof("Transaction output length is: %d", len(packet.UnsignedTx.TxOut))
+	log.Infof("Transaction input length is: %d", len(packet.UnsignedTx.TxIn))
+	log.Infof("Transaction output length is: %d", len(packet.Outputs))
+
 	// In a default transaction, all outputs must be either whitelisted or
 	// internal addresses.
-	for outputIndex, _ := range packet.Outputs {
+	for outputIndex, _ := range packet.UnsignedTx.TxOut {
 		isOurOutput, err := r.isOurOutput(
-			ctx, packet, outputIndex,
+			ctx, packet.UnsignedTx.TxOut[outputIndex].PkScript,
 		)
 		if err != nil {
 			return nil, err
@@ -2275,14 +2248,11 @@ func (r *Validator) validateDefaultTransaction(ctx context.Context,
 		if !isOurOutput {
 			log.Errorf("Output in default transaction isn't ours")
 
-			// TODO: Comment back
-			/*
-				failRes := ValidationFailureResult("output script " +
-					"not matching for Second level HTLC output  in " +
-					"local second level HTLC transaction")
-				return failRes, nil
+			failRes := ValidationFailureResult("Found address in " +
+				"default transaction that wasn't either " +
+				"whitelisted or an internal address")
 
-			*/
+			return failRes, nil
 		}
 	}
 
@@ -2588,6 +2558,7 @@ func deriveKey(keyPath []uint32,
 
 func (r *Validator) isAddressInternal(key *hdkeychain.ExtendedKey,
 	accountPath []uint32, keysToCheck uint32,
+	pubkeyToPKScript func(*btcec.PublicKey) (btcutil.Address, error),
 	matchAddressPkScript []byte) (bool, error) {
 
 	pkScriptMatches := func(addr btcutil.Address) (bool, error) {
@@ -2611,25 +2582,17 @@ func (r *Validator) isAddressInternal(key *hdkeychain.ExtendedKey,
 				return false, err
 			}
 
-			/*addrKey, err := derivedKey.DeriveNonStandard(i)
-			if err != nil {
-				return false, err
-			}*/
-
 			addrPubKey, err := derivedKey.ECPubKey()
 			if err != nil {
 				return false, err
 			}
 
-			hash160 := btcutil.Hash160(addrPubKey.SerializeCompressed())
-			addrP2PKH, err := btcutil.NewAddressPubKeyHash(
-				hash160, r.network,
-			)
+			addr, err := pubkeyToPKScript(addrPubKey)
 			if err != nil {
-				return false, fmt.Errorf("could not create address: %w", err)
+				return false, err
 			}
 
-			isMatch, err := pkScriptMatches(addrP2PKH)
+			isMatch, err := pkScriptMatches(addr)
 			if err != nil {
 				return false, err
 			}
@@ -2638,67 +2601,56 @@ func (r *Validator) isAddressInternal(key *hdkeychain.ExtendedKey,
 				return true, nil
 			}
 
-			addrP2WKH, err := btcutil.NewAddressWitnessPubKeyHash(
-				hash160, r.network,
-			)
-			if err != nil {
-				return false, fmt.Errorf("could not create address: %w", err)
-			}
+			// TODO: remove below
 
-			isMatch, err = pkScriptMatches(addrP2WKH)
-			if err != nil {
-				return false, err
-			}
-
-			if isMatch {
-				return true, nil
-			}
-
-			taprootKey := txscript.ComputeTaprootKeyNoScript(addrPubKey)
-			addrP2TR, err := btcutil.NewAddressTaproot(
-				schnorr.SerializePubKey(taprootKey), r.network,
-			)
-			if err != nil {
-				return false, fmt.Errorf("could not create address: %w", err)
-			}
-
-			isMatch, err = pkScriptMatches(addrP2TR)
-			if err != nil {
-				return false, err
-			}
-
-			if isMatch {
-				return true, nil
-			}
-
-			/*pubKeyHash := btcutil.Hash160(addrPubKey.SerializeCompressed())
-			witnessAddr, err := btcutil.NewAddressWitnessPubKeyHash(
-				pubKeyHash, r.network,
-			)
-			if err != nil {
-				return false, err
-			}*/
-
-			// TODO: This part below has been moved to helper func above
 			/*
-				witnessProgram, err := txscript.PayToAddrScript(witnessAddr)
-				if err != nil {
-					return false, err
-				}
-
-				np2wkhAddr, err := btcutil.NewAddressScriptHash(
-					witnessProgram, r.network,
+				hash160 := btcutil.Hash160(addrPubKey.SerializeCompressed())
+				addrP2PKH, err := btcutil.NewAddressPubKeyHash(
+					hash160, r.network,
 				)
 				if err != nil {
-					return false, err
+					return false, fmt.Errorf("could not create address: %w", err)
 				}
 
-				pkScript, err := txscript.PayToAddrScript(np2wkhAddr)
+				isMatch, err := pkScriptMatches(addrP2PKH)
 				if err != nil {
 					return false, err
 				}
 
-				if bytes.Equal(pkScript, matchAddressPkScript) {
+				if isMatch {
+					return true, nil
+				}
+
+				addrP2WKH, err := btcutil.NewAddressWitnessPubKeyHash(
+					hash160, r.network,
+				)
+				if err != nil {
+					return false, fmt.Errorf("could not create address: %w", err)
+				}
+
+				isMatch, err = pkScriptMatches(addrP2WKH)
+				if err != nil {
+					return false, err
+				}
+
+				if isMatch {
+					return true, nil
+				}
+
+				taprootKey := txscript.ComputeTaprootKeyNoScript(addrPubKey)
+				addrP2TR, err := btcutil.NewAddressTaproot(
+					schnorr.SerializePubKey(taprootKey), r.network,
+				)
+				if err != nil {
+					return false, fmt.Errorf("could not create address: %w", err)
+				}
+
+				isMatch, err = pkScriptMatches(addrP2TR)
+				if err != nil {
+					return false, err
+				}
+
+				if isMatch {
 					return true, nil
 				}
 			*/
@@ -2710,10 +2662,12 @@ func (r *Validator) isAddressInternal(key *hdkeychain.ExtendedKey,
 
 // isOurOutput checks if the output address is derived from a
 // local key, or is a whitelisted address
-func (r *Validator) isOurOutput(ctx context.Context, packet *psbt.Packet,
-	outputIndex int) (bool, error) {
+func (r *Validator) isOurOutput(ctx context.Context,
+	pkScript []byte) (bool, error) {
 
-	isWhitelisted, err := r.isWhiteListedAddress(ctx, packet, outputIndex)
+	extraKeysToCheck := uint32(1000)
+
+	isWhitelisted, err := r.isWhiteListedAddress(ctx, pkScript)
 	if err != nil {
 		return false, err
 	}
@@ -2725,15 +2679,86 @@ func (r *Validator) isOurOutput(ctx context.Context, packet *psbt.Packet,
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	sClass, _, _, err := txscript.ExtractPkScriptAddrs(pkScript, r.network)
+	if err != nil {
+		return false, err
+	}
+
 	for _, account := range r.accounts {
+		var pubkeyToPKScript func(*btcec.PublicKey) (btcutil.Address, error)
+
+		// TODO: Verify that these types are enough to check, i.e. does
+		// lnd ever create addresses internally of other address types.
+		if account.AddressType == walletrpc.AddressType_WITNESS_PUBKEY_HASH {
+			if sClass != txscript.WitnessV0PubKeyHashTy {
+				continue
+			}
+
+			pubkeyToPKScript = func(pubKey *btcec.PublicKey) (
+				btcutil.Address, error) {
+
+				hash160 := btcutil.Hash160(
+					pubKey.SerializeCompressed(),
+				)
+
+				return btcutil.NewAddressWitnessPubKeyHash(
+					hash160, r.network,
+				)
+			}
+		} else if account.AddressType == walletrpc.AddressType_TAPROOT_PUBKEY {
+			if sClass != txscript.WitnessV1TaprootTy {
+				continue
+			}
+
+			pubkeyToPKScript = func(pubKey *btcec.PublicKey) (
+				btcutil.Address, error) {
+
+				taprootKey := txscript.ComputeTaprootKeyNoScript(
+					pubKey,
+				)
+
+				return btcutil.NewAddressTaproot(
+					schnorr.SerializePubKey(taprootKey), r.network,
+				)
+			}
+		} else if account.AddressType == walletrpc.AddressType_HYBRID_NESTED_WITNESS_PUBKEY_HASH {
+			// TODO: Validate if this one is actually correct, as
+			// well as the pubkeyToPKScript func below
+			if sClass != txscript.ScriptHashTy {
+				continue
+			}
+
+			pubkeyToPKScript = func(pubKey *btcec.PublicKey) (
+				btcutil.Address, error) {
+
+				pubKeyHash := btcutil.Hash160(pubKey.SerializeCompressed())
+				witnessAddr, err := btcutil.NewAddressWitnessPubKeyHash(
+					pubKeyHash, r.network,
+				)
+				if err != nil {
+					return nil, err
+				}
+
+				witnessProgram, err := txscript.PayToAddrScript(
+					witnessAddr,
+				)
+				if err != nil {
+					return nil, err
+				}
+
+				return btcutil.NewAddressScriptHash(
+					witnessProgram, r.network,
+				)
+			}
+		} else {
+			continue
+		}
+
 		parsedPath, err := ParsePath(account.GetDerivationPath())
 		if err != nil {
 			return false, err
 		}
 
-		log.Infof("parsedPath is %v", parsedPath)
-
-		log.Infof("reseting parsedPath")
 		parsedPath = make([]uint32, 0)
 
 		xKey, err := hdkeychain.NewKeyFromString(
@@ -2749,8 +2774,8 @@ func (r *Validator) isOurOutput(ctx context.Context, packet *psbt.Packet,
 		}
 
 		isInternal, err := r.isAddressInternal(
-			xKey, parsedPath, 1000+keyCount,
-			packet.UnsignedTx.TxOut[outputIndex].PkScript,
+			xKey, parsedPath, extraKeysToCheck+keyCount,
+			pubkeyToPKScript, pkScript,
 		)
 		if err != nil {
 			return false, err
@@ -2765,26 +2790,16 @@ func (r *Validator) isOurOutput(ctx context.Context, packet *psbt.Packet,
 	}
 
 	log.Infof("!!!! DID NOT!!! FIND INTERNAL ADDRESS")
-	//TODO: remote this return
-	return true, nil
-
 	return false, nil
 }
 
 // isOurOutput checks if the output address at the specified index is
 // whitelisted.
 func (r *Validator) isWhiteListedAddress(ctx context.Context,
-	packet *psbt.Packet, outputIndex int) (bool, error) {
-
-	outputScript := packet.UnsignedTx.TxOut[outputIndex].PkScript
+	matchPkScript []byte) (bool, error) {
 
 	addresses, err := r.remoteSignerDB.ListWhitelistedAddresses(ctx)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			// No whitelisted payment hash found.
-			return false, nil
-		}
-
 		return false, err
 	}
 
@@ -2795,11 +2810,22 @@ func (r *Validator) isWhiteListedAddress(ctx context.Context,
 				err)
 		}
 
-		if bytes.Equal(addr.ScriptAddress(), outputScript) {
+		pkScript, err := txscript.PayToAddrScript(addr)
+		if err != nil {
+			return false, err
+		}
+
+		if bytes.Equal(pkScript, matchPkScript) {
 			log.Infof("!!!!! address %s, is whitelisted", address)
 
 			return true, nil
 		}
+
+		/*if bytes.Equal(addr.ScriptAddress(), outputScript) {
+			log.Infof("!!!!! address %s, is whitelisted", address)
+
+			return true, nil
+		}*/
 	}
 
 	log.Infof("!!!!! address was not whitelisted")

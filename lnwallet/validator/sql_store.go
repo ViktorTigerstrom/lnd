@@ -145,6 +145,10 @@ func (s *RemoteSignerSQLStore) ListWhitelistedAddresses(ctx context.Context) (
 
 	res, err := s.db.ListWhitelistedAddresses(ctx)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return make([]string, 0), nil
+		}
+
 		return nil, err
 	}
 
@@ -209,6 +213,10 @@ func (s *RemoteSignerSQLStore) ListWhitelistedPaymentHashes(
 
 	res, err := s.db.ListWhitelistedPaymentHashes(ctx)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return make([][]byte, 0), nil
+		}
+
 		return nil, err
 	}
 
