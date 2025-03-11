@@ -289,11 +289,6 @@ func (r *RPCKeyRing) FinalizePsbt(packet *psbt.Packet, _ string) error {
 			SigHashes:         sigHashes,
 			InputIndex:        idx,
 			PrevOutputFetcher: prevOutFetcher,
-			TransactionType: input.UnknownOptions(
-				// potentially unnecessary as this call can't be
-				// forwarded to remote signer.
-				input.DefaultTransaction(),
-			),
 		}
 
 		// Find out what UTXO we are signing. Wallets _should_ always

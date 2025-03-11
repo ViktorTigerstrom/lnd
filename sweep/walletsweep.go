@@ -324,9 +324,6 @@ func CraftSweepAllTx(feeRate, maxFeeRate chainfee.SatPerKWeight,
 				Value:    int64(output.Value),
 			},
 			HashType: txscript.SigHashAll,
-			TransactionType: input.UnknownOptions(
-				input.DefaultTransaction(), // Sweep
-			),
 		}
 
 		pkScript := output.PkScript

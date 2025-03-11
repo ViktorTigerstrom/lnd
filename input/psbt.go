@@ -1,15 +1,16 @@
 package input
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/lightningnetwork/lnd/lntypes"
-
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/btcutil/psbt"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/lightningnetwork/lnd/keychain"
+	"github.com/lightningnetwork/lnd/lntypes"
+	"io"
 )
 
 const (
@@ -55,6 +56,7 @@ var (
 	PsbtKeyOutputTypeRemoteAnchor              = []byte{0x82}
 	PsbtKeyOutputTypeLocalAnchor               = []byte{0x83}
 	PsbtKeyOutputTypeSecondLevelHTLC           = []byte{0x84}
+	PsbtKeyOutputTypeDefault                   = []byte{0x85}
 
 	byteOrder = binary.LittleEndian
 )
@@ -230,168 +232,9 @@ func FundingOutpoint(fundingOutpoint wire.OutPoint) (UnknownOption, error) {
 	), nil
 }
 
-/*
-// fundingOutpointToBytes converts an wire.OutPoint a 36-byte slice.
-func fundingOutpointToBytes(outpoint wire.OutPoint) ([]byte, error) {
-	// Decode the txid (hex string) to bytes
-	txidBytes, err := hex.DecodeString(outpoint.Hash.String())
-	if err != nil {
-		return nil, err
-	}
-
-	// Reverse the txid bytes (Bitcoin stores txids little-endian internally)
-	for i := 0; i < len(txidBytes)/2; i++ {
-		txidBytes[i], txidBytes[len(txidBytes)-1-i] = txidBytes[len(txidBytes)-1-i], txidBytes[i]
-	}
-
-	// Convert the output index (uint32) to little-endian byte slice
-	indexBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(indexBytes, outpoint.Index)
-
-	// Concatenate txidBytes (32 bytes) + indexBytes (4 bytes)
-	finalBytes := append(txidBytes, indexBytes...)
-
-	return finalBytes, nil
-}
-
-// bytesToFundingOutpoint converts a 36-byte slice back to a wire.OutPoint.
-func bytesToFundingOutpoint(data []byte) (wire.OutPoint, error) {
-	// The expected length is 36 bytes: 32 for the txid and 4 for the index.
-	if len(data) != 36 {
-		return wire.OutPoint{}, errors.New("invalid data length; expected 36 bytes")
-	}
-
-	// Extract the txid bytes and reverse them.
-	txidBytes := make([]byte, 32)
-	copy(txidBytes, data[:32])
-	for i := 0; i < len(txidBytes)/2; i++ {
-		txidBytes[i], txidBytes[len(txidBytes)-1-i] = txidBytes[len(txidBytes)-1-i], txidBytes[i]
-	}
-
-	// Convert the txid bytes to a chainhash.Hash.
-	hash, err := chainhash.NewHash(txidBytes)
-	if err != nil {
-		return wire.OutPoint{}, err
-	}
-
-	// Extract the 4-byte index from the remaining bytes.
-	index := binary.LittleEndian.Uint32(data[32:36])
-
-	// Build the OutPoint.
-	outpoint := wire.OutPoint{
-		Hash:  *hash,
-		Index: index,
-	}
-
-	return outpoint, nil
-}*/
-
 // RHash returns an UnknownOption for the rHash.
 func RHash(rHash []byte) UnknownOption {
 	return wrapUnknownOption(PsbtKeyTypeOutputRHash, rHash)
-}
-
-// LocalMultiSigKey returns an UnknownOption for the local multisig key. It
-// requires the wallet's root key fingerprint and coin type to construct the
-// derivation path correctly.
-func LocalMultiSigKey(fingerprint, coin uint32,
-	desc *keychain.KeyDescriptor) UnknownOption {
-
-	return wrapUnknownOption(
-		PsbtKeyTypeOutputLocalMultiSigKey,
-		descBytes(fingerprint, coin, desc),
-	)
-}
-
-// LocalRevocationBasePoint returns an UnknownOption for the local revocation
-// base point. It requires the wallet's root key fingerprint and coin type to
-// construct the derivation path correctly.
-func LocalRevocationBasePoint(fingerprint, coin uint32,
-	desc *keychain.KeyDescriptor) UnknownOption {
-
-	return wrapUnknownOption(
-		PsbtKeyTypeOutputLocalRevocationBasePoint,
-		descBytes(fingerprint, coin, desc),
-	)
-}
-
-// LocalPaymentBasePoint returns an UnknownOption for the local payment base
-// point. It requires the wallet's root key fingerprint and coin type to
-// construct the derivation path correctly.
-func LocalPaymentBasePoint(fingerprint, coin uint32,
-	desc *keychain.KeyDescriptor) UnknownOption {
-
-	return wrapUnknownOption(
-		PsbtKeyTypeOutputLocalPaymentBasePoint,
-		descBytes(fingerprint, coin, desc),
-	)
-}
-
-// LocalDelayBasePoint returns an UnknownOption for the local delay base point.
-// It requires the wallet's root key fingerprint and coin type to construct the
-// derivation path correctly.
-func LocalDelayBasePoint(fingerprint, coin uint32,
-	desc *keychain.KeyDescriptor) UnknownOption {
-
-	return wrapUnknownOption(
-		PsbtKeyTypeOutputLocalDelayBasePoint,
-		descBytes(fingerprint, coin, desc),
-	)
-}
-
-// LocalHtlcBasePoint returns an UnknownOption for the local HTLC base point.
-// It requires the wallet's root key fingerprint and coin type to construct the
-// derivation path correctly.
-func LocalHtlcBasePoint(fingerprint, coin uint32,
-	desc *keychain.KeyDescriptor) UnknownOption {
-
-	return wrapUnknownOption(
-		PsbtKeyTypeOutputLocalHtlcBasePoint,
-		descBytes(fingerprint, coin, desc),
-	)
-}
-
-// RemoteMultiSigKey returns an UnknownOption for the remote multisig key.
-func RemoteMultiSigKey(key *btcec.PublicKey) UnknownOption {
-	return wrapUnknownOption(
-		PsbtKeyTypeOutputRemoteMultiSigKey,
-		key.SerializeCompressed(),
-	)
-}
-
-// RemoteRevocationBasePoint returns an UnknownOption for the remote revocation
-// base point.
-func RemoteRevocationBasePoint(key *btcec.PublicKey) UnknownOption {
-	return wrapUnknownOption(
-		PsbtKeyTypeOutputRemoteRevocationBasePoint,
-		key.SerializeCompressed(),
-	)
-}
-
-// RemotePaymentBasePoint returns an UnknownOption for the remote payment base
-// point.
-func RemotePaymentBasePoint(key *btcec.PublicKey) UnknownOption {
-	return wrapUnknownOption(
-		PsbtKeyTypeOutputRemotePaymentBasePoint,
-		key.SerializeCompressed(),
-	)
-}
-
-// RemoteDelayBasePoint returns an UnknownOption for the remote delay base
-// point.
-func RemoteDelayBasePoint(key *btcec.PublicKey) UnknownOption {
-	return wrapUnknownOption(
-		PsbtKeyTypeOutputRemoteDelayBasePoint,
-		key.SerializeCompressed(),
-	)
-}
-
-// RemoteHtlcBasePoint returns an UnknownOption for the remote HTLC base point.
-func RemoteHtlcBasePoint(key *btcec.PublicKey) UnknownOption {
-	return wrapUnknownOption(
-		PsbtKeyTypeOutputRemoteHtlcBasePoint,
-		key.SerializeCompressed(),
-	)
 }
 
 // RemoteCommitmentTransaction returns an UnknownOption for remote commitment
@@ -518,6 +361,14 @@ func SecondLeveLHTLCOutput() UnknownOption {
 	)
 }
 
+// SecondLeveLHTLCOutput returns an UnknownOption for the second level HTLC
+// output type.
+func DefaultOutput() UnknownOption {
+	return wrapUnknownOption(
+		PsbtKeyOutputTypeDefault, []byte{},
+	)
+}
+
 // KeyDescriptorFromUnknownValue decodes a value encoded by LocalDesc. It
 // returns, in order:
 // * Root key fingerprint of the wallet
@@ -582,4 +433,152 @@ func KeyDescriptorFromUnknownValue(value []byte) (
 	}
 
 	return fingerprint, coinType, localDesc, nil
+}
+
+// SerializeSignInfos serializes a slice of SignInfo into a byte slice.
+// The format is as follows:
+//
+//	[totalLen:uint32] [numSignInfos:uint32]
+//	For each SignInfo:
+//	    [numUnknowns:uint32]
+//	    For each unknown:
+//	        [keyLen:uint32] [key bytes]
+//	        [valLen:uint32] [value bytes]
+func SerializeSignInfos(infos []SignInfo) ([]byte, error) {
+	// Use a temporary buffer for the payload.
+	payload := new(bytes.Buffer)
+
+	// Write the number of SignInfo entries.
+	if err := binary.Write(payload, byteOrder, uint32(len(infos))); err != nil {
+		return nil, fmt.Errorf("failed to write number of SignInfos: %v", err)
+	}
+
+	// For each SignInfo entry.
+	for _, info := range infos {
+		// Write the number of unknown entries in this SignInfo.
+		if err := binary.Write(payload, byteOrder, uint32(len(info))); err != nil {
+			return nil, fmt.Errorf("failed to write number of unknowns: %v", err)
+		}
+
+		// Write each unknown entry.
+		for _, unk := range info {
+			// Write key length and key bytes.
+			if err := binary.Write(payload, byteOrder, uint32(len(unk.Key))); err != nil {
+				return nil, fmt.Errorf("failed to write key length: %v", err)
+			}
+			if _, err := payload.Write(unk.Key); err != nil {
+				return nil, fmt.Errorf("failed to write key: %v", err)
+			}
+
+			// Write value length and value bytes.
+			if err := binary.Write(payload, byteOrder, uint32(len(unk.Value))); err != nil {
+				return nil, fmt.Errorf("failed to write value length: %v", err)
+			}
+			if _, err := payload.Write(unk.Value); err != nil {
+				return nil, fmt.Errorf("failed to write value: %v", err)
+			}
+		}
+	}
+
+	// Prepend the payload with its total length as a 4-byte little-endian uint32.
+	finalBuf := new(bytes.Buffer)
+	totalLen := uint32(payload.Len())
+	if err := binary.Write(finalBuf, byteOrder, totalLen); err != nil {
+		return nil, fmt.Errorf("failed to write total length: %v", err)
+	}
+	if _, err := finalBuf.Write(payload.Bytes()); err != nil {
+		return nil, fmt.Errorf("failed to write payload: %v", err)
+	}
+
+	return finalBuf.Bytes(), nil
+}
+
+// ParseSignInfos parses a byte slice (serialized using SerializeSignInfos)
+// into a slice of SignInfo. It assumes that the first 4 bytes indicate the
+// total payload length.
+func ParseSignInfos(data []byte) ([]SignInfo, error) {
+	buf := bytes.NewReader(data)
+
+	// Read the total length prefix.
+	var totalLen uint32
+	if err := binary.Read(buf, byteOrder, &totalLen); err != nil {
+		return nil, fmt.Errorf("failed to read total length: %v", err)
+	}
+
+	// Optionally verify that the remaining bytes match totalLen.
+	if totalLen != uint32(buf.Len()) {
+		return nil, fmt.Errorf("mismatched length: expected %d bytes, got %d bytes", totalLen, buf.Len())
+	}
+
+	// Read the number of SignInfo entries.
+	var numInfos uint32
+	if err := binary.Read(buf, byteOrder, &numInfos); err != nil {
+		return nil, fmt.Errorf("failed to read number of SignInfos: %v", err)
+	}
+
+	infos := make([]SignInfo, 0, numInfos)
+	for i := uint32(0); i < numInfos; i++ {
+		// Read the number of unknown entries in this SignInfo.
+		var numUnknowns uint32
+		if err := binary.Read(buf, byteOrder, &numUnknowns); err != nil {
+			return nil, fmt.Errorf("failed to read number of unknowns: %v", err)
+		}
+
+		var info SignInfo
+		for j := uint32(0); j < numUnknowns; j++ {
+			// Read key length.
+			var keyLen uint32
+			if err := binary.Read(buf, byteOrder, &keyLen); err != nil {
+				return nil, fmt.Errorf("failed to read key length: %v", err)
+			}
+
+			// Read key.
+			key := make([]byte, keyLen)
+			if _, err := io.ReadFull(buf, key); err != nil {
+				return nil, fmt.Errorf("failed to read key: %v", err)
+			}
+
+			// Read value length.
+			var valueLen uint32
+			if err := binary.Read(buf, byteOrder, &valueLen); err != nil {
+				return nil, fmt.Errorf("failed to read value length: %v", err)
+			}
+
+			// Read value.
+			value := make([]byte, valueLen)
+			if _, err := io.ReadFull(buf, value); err != nil {
+				return nil, fmt.Errorf("failed to read value: %v", err)
+			}
+
+			// Append the unknown to the current SignInfo.
+			info = append(info, &psbt.Unknown{
+				Key:   key,
+				Value: value,
+			})
+		}
+
+		infos = append(infos, info)
+	}
+
+	return infos, nil
+}
+
+// SerializedSignInfosLength takes a byte slice (which might have extra bytes appended)
+// and returns the total number of bytes that were produced by SerializeSignInfos,
+// including the 4-byte length prefix.
+func SerializedSignInfosLength(data []byte) (int, error) {
+	// Check that there's at least 4 bytes for the total length prefix.
+	if len(data) < 4 {
+		return 0, fmt.Errorf("insufficient data: expected at least 4 bytes, got %d", len(data))
+	}
+
+	// Read the total length of the payload.
+	totalLen := binary.LittleEndian.Uint32(data[:4])
+	serializedLength := int(4 + totalLen)
+
+	if len(data) < serializedLength {
+		return 0, fmt.Errorf("insufficient data: expected %d bytes, got %d", serializedLength, len(data))
+	}
+
+	return serializedLength, nil
 }

@@ -75,9 +75,6 @@ func createWalletTxInput(utxo *lnwallet.Utxo) (input.Input, error) {
 			Value:    int64(utxo.Value),
 		},
 		HashType: txscript.SigHashAll,
-		TransactionType: input.UnknownOptions(
-			input.DefaultTransaction(), // Sweep
-		),
 	}
 
 	var witnessType input.WitnessType
@@ -236,31 +233,38 @@ func (b *BudgetInputSet) String() string {
 }
 
 // addInput adds an input to the input set.
-func (b *BudgetInputSet) addInput(input SweeperInput) {
+func (b *BudgetInputSet) addInput(sweepInput SweeperInput) {
 	// If we're adding an input with the sweeper, we need to ensure that
-	// the sweeper input gets set to the same SignDesc TransactionType as
-	// the other input in the transaction, if such a TransactionType has
-	// been set. Else the remote signer validator will fail to validate the
-	// transaction when it's being asked to sign the sweeper input, as it'll
-	// then use the default transaction type, which might not represent all
-	// outputs in the tx.
-	for _, currentInput := range b.inputs {
-		if currentInput.Input.SignDesc() == nil {
-			log.Errorf("an existing input in the sweeper input "+
-				"set has no sign desc: %v", currentInput.Input)
-
+	// the sweeper input gets set to the same SignDesc TransactionType and
+	// OutSignInfo as the other input in the transaction, if such info has
+	// been set. The reason for doing so, is that the remote signer
+	// validator may need that data to properly identify the outputs in the
+	// transaction.
+	for _, in := range b.inputs {
+		if in.Input.SignDesc() == nil {
 			continue
 		}
-		txType := currentInput.Input.SignDesc().TransactionType
+
+		txType := in.Input.SignDesc().TransactionType
 
 		if txType != nil {
-			input.Input.SignDesc().TransactionType = txType
+			sweepInput.Input.SignDesc().TransactionType = txType
 
+			sweepInput.Input.SignDesc().OutSignInfo =
+				in.Input.SignDesc().OutSignInfo
+
+			log.Debugf("Set custom transaction type for sweeper" +
+				"input")
+
+			// Note that if this added input adds an output to that
+			// transaction, the added output will be also added to
+			// the OutSignInfo when the actual transaction is
+			// constructed.
 			break
 		}
 	}
 
-	b.inputs = append(b.inputs, &input)
+	b.inputs = append(b.inputs, &sweepInput)
 }
 
 // NeedWalletInput returns true if the input set needs more wallet inputs.

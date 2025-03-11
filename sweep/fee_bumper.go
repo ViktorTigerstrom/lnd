@@ -1277,6 +1277,35 @@ func (t *TxPublisher) createSweepTx(inputs []input.Input,
 	changeOutputsOpt.WhenSome(func(changeOuts []SweepOutput) {
 		for i := range changeOuts {
 			sweepTx.AddTxOut(&changeOuts[i].TxOut)
+
+			// If we do add an input, we also need to reflect that
+			// added input in the inputs' SignDesc.OutSignInfo if
+			// it's missing.
+			for _, idx := range idxs {
+				if idx.SignDesc() == nil ||
+					idx.SignDesc().OutSignInfo == nil {
+
+					continue
+				}
+
+				hasMissingSignInfo := func() bool {
+					return len(idx.SignDesc().OutSignInfo) <
+						len(sweepTx.TxOut)
+				}
+
+				if hasMissingSignInfo() {
+					idx.SignDesc().OutSignInfo = append(
+						idx.SignDesc().OutSignInfo,
+						input.UnknownOptions(
+							input.DefaultOutput(),
+						),
+					)
+
+					if !hasMissingSignInfo() {
+						break
+					}
+				}
+			}
 		}
 	})
 

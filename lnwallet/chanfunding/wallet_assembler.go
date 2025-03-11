@@ -187,41 +187,6 @@ func (f *FullIntent) CompileFundingTx(extraInputs []*wire.TxIn,
 	// We'll also pre-compute the OutSignInfo for the SignDescriptor in case
 	// we're doing remote signing.
 	outSignInfo := make([]input.SignInfo, len(fundingTx.TxOut))
-	outSignInfo[multiSigIndex] = input.UnknownOptions(
-		input.LocalMultiSigKey(
-			f.fingerprint, f.coin, &f.localConfig.MultiSigKey,
-		),
-		input.LocalRevocationBasePoint(
-			f.fingerprint, f.coin,
-			&f.localConfig.RevocationBasePoint,
-		),
-		input.LocalPaymentBasePoint(
-			f.fingerprint, f.coin, &f.localConfig.PaymentBasePoint,
-		),
-		input.LocalDelayBasePoint(
-			f.fingerprint, f.coin, &f.localConfig.DelayBasePoint,
-		),
-		input.LocalHtlcBasePoint(
-			f.fingerprint, f.coin, &f.localConfig.HtlcBasePoint,
-		),
-		input.RemoteMultiSigKey(
-			f.remoteConfig.MultiSigKey.PubKey,
-		),
-		input.RemoteRevocationBasePoint(
-			f.remoteConfig.RevocationBasePoint.PubKey,
-		),
-		input.RemotePaymentBasePoint(
-			f.remoteConfig.PaymentBasePoint.PubKey,
-		),
-		input.RemoteDelayBasePoint(
-			f.remoteConfig.DelayBasePoint.PubKey,
-		),
-		input.RemoteHtlcBasePoint(
-			f.remoteConfig.HtlcBasePoint.PubKey,
-		),
-		input.ChannelType(uint64(f.chanType)),
-		input.Initiator(f.initiator),
-	)
 
 	// Next, sign all inputs that are ours, collecting the signatures in
 	// order of the inputs.

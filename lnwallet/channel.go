@@ -2196,9 +2196,6 @@ func NewBreachRetribution(chanState *channeldb.OpenChannel, stateNum uint64,
 				Value:    ourAmt,
 			},
 			HashType: sweepSigHash(chanState.ChanType),
-			TransactionType: input.UnknownOptions(
-				input.DefaultTransaction(), // SWEEP
-			),
 		}
 
 		// For taproot channels, we'll make sure to set the script path
@@ -2279,9 +2276,6 @@ func NewBreachRetribution(chanState *channeldb.OpenChannel, stateNum uint64,
 				Value:    theirAmt,
 			},
 			HashType: sweepSigHash(chanState.ChanType),
-			TransactionType: input.UnknownOptions(
-				input.DefaultTransaction(), // SWEEP
-			),
 		}
 
 		// For taproot channels, the remote output (the revoked output)
@@ -6958,9 +6952,6 @@ func NewUnilateralCloseSummary(chanState *channeldb.OpenChannel, //nolint:funlen
 					PkScript: selfScript.PkScript(),
 				},
 				HashType: sweepSigHash(chanState.ChanType),
-				TransactionType: input.UnknownOptions(
-					input.DefaultTransaction(), //SWEEP
-				),
 			},
 			MaturityDelay: maturityDelay,
 		}
@@ -7249,9 +7240,6 @@ func newOutgoingHtlcResolution(signer input.Signer,
 			},
 			HashType:          sweepSigHash(chanType),
 			PrevOutputFetcher: prevFetcher,
-			TransactionType: input.UnknownOptions(
-				input.DefaultTransaction(), // Sweep
-			),
 		}
 
 		scriptTree, ok := htlcScriptInfo.(input.TapscriptDescriptor)
@@ -7483,9 +7471,6 @@ func newOutgoingHtlcResolution(signer input.Signer,
 		),
 		SignMethod:   signMethod,
 		ControlBlock: ctrlBlock,
-		TransactionType: input.UnknownOptions(
-			input.DefaultTransaction(), // Sweep
-		),
 	}
 
 	// This might be an aux channel, so we'll go ahead and attempt to
@@ -7614,9 +7599,6 @@ func newIncomingHtlcResolution(signer input.Signer,
 			},
 			HashType:          sweepSigHash(chanType),
 			PrevOutputFetcher: prevFetcher,
-			TransactionType: input.UnknownOptions(
-				input.DefaultTransaction(), // Sweep
-			),
 		}
 
 		//nolint:ll
@@ -7841,9 +7823,6 @@ func newIncomingHtlcResolution(signer input.Signer,
 		PrevOutputFetcher: txscript.NewCannedPrevOutputFetcher(
 			htlcSweepScript.PkScript(),
 			int64(secondLevelOutputAmt),
-		),
-		TransactionType: input.UnknownOptions(
-			input.DefaultTransaction(), // Sweep
 		),
 		SignMethod:   signMethod,
 		ControlBlock: ctrlBlock,
@@ -8254,9 +8233,6 @@ func NewLocalForceCloseSummary(chanState *channeldb.OpenChannel,
 					Value:    localBalance,
 				},
 				HashType: sweepSigHash(chanState.ChanType),
-				TransactionType: input.UnknownOptions(
-					input.DefaultTransaction(), // Sweep
-				),
 			},
 			MaturityDelay: csvTimeout,
 		}
@@ -8879,9 +8855,6 @@ func NewAnchorResolution(chanState *channeldb.OpenChannel,
 			Value:    int64(AnchorSize),
 		},
 		HashType: sweepSigHash(chanState.ChanType),
-		TransactionType: input.UnknownOptions(
-			input.DefaultTransaction(), // Sweep
-		),
 	}
 
 	// For taproot outputs, we'll need to ensure that the proper sign
