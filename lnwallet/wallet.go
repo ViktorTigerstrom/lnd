@@ -1779,16 +1779,18 @@ func (l *LightningWallet) handleContributionMsg(req *addContributionMsg) {
 // partial signature.
 func genMusigSession(ourContribution, theirContribution *ChannelContribution,
 	signer input.MuSig2Signer, fundingOutput *wire.TxOut,
-	tapscriptRoot fn.Option[chainhash.Hash]) *MusigPairSession {
+	tapscriptRoot fn.Option[chainhash.Hash],
+	rsInformer fn.Option[RemoteSignerInformer]) *MusigPairSession {
 
 	return NewMusigPairSession(&MusigSessionCfg{
-		LocalKey:       ourContribution.MultiSigKey,
-		RemoteKey:      theirContribution.MultiSigKey,
-		LocalNonce:     *ourContribution.LocalNonce,
-		RemoteNonce:    *theirContribution.LocalNonce,
-		Signer:         signer,
-		InputTxOut:     fundingOutput,
-		TapscriptTweak: tapscriptRoot,
+		LocalKey:             ourContribution.MultiSigKey,
+		RemoteKey:            theirContribution.MultiSigKey,
+		LocalNonce:           *ourContribution.LocalNonce,
+		RemoteNonce:          *theirContribution.LocalNonce,
+		Signer:               signer,
+		InputTxOut:           fundingOutput,
+		TapscriptTweak:       tapscriptRoot,
+		RemoteSignerInformer: rsInformer,
 	})
 }
 
@@ -1844,8 +1846,16 @@ func (l *LightningWallet) signCommitTx(pendingReservation *ChannelReservation,
 				ourContribution, theirContribution,
 				l.Cfg.Signer, fundingOutput,
 				pendingReservation.partialState.TapscriptRoot,
+				l.Cfg.RemoteSignerInformer,
 			)
 			pendingReservation.musigSessions = musigSessions
+		}
+
+		signDesc := &input.SignDescriptor{
+			OutSignInfo: theirSignInfo,
+			TransactionType: input.UnknownOptions(
+				input.RemoteCommitmentTransaction(),
+			),
 		}
 
 		// Now that we have the funding outpoint, we'll generate a
@@ -1854,7 +1864,7 @@ func (l *LightningWallet) signCommitTx(pendingReservation *ChannelReservation,
 		// remote commitment transaction.
 		musigSessions := pendingReservation.musigSessions
 		partialSig, err := musigSessions.RemoteSession.SignCommit(
-			commitTx,
+			commitTx, signDesc,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("unable to sign "+
@@ -2257,6 +2267,7 @@ func (l *LightningWallet) verifyCommitSig(res *ChannelReservation,
 				res.ourContribution, res.theirContribution,
 				l.Cfg.Signer, fundingOutput,
 				res.partialState.TapscriptRoot,
+				l.Cfg.RemoteSignerInformer,
 			)
 		}
 
@@ -2652,6 +2663,9 @@ func (l *LightningWallet) ValidateChannel(channelState *channeldb.OpenChannel,
 	})
 	l.Cfg.AuxSigner.WhenSome(func(s AuxSigner) {
 		chanOpts = append(chanOpts, WithAuxSigner(s))
+	})
+	l.Cfg.RemoteSignerInformer.WhenSome(func(rsi RemoteSignerInformer) {
+		chanOpts = append(chanOpts, WithRemoteSignerInformer(rsi))
 	})
 
 	// First, we'll obtain a fully signed commitment transaction so we can

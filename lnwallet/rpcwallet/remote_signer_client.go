@@ -771,6 +771,17 @@ func (r *OutboundClient) process(ctx context.Context,
 		return signResp, nil
 
 	case *walletrpc.SignCoordinatorRequest_MuSig2SignRequest:
+		res, err := r.validator.ValidateMuSig2Sign(
+			ctx, reqType.MuSig2SignRequest,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		if res.Type == validator.ValidationFailure {
+			return nil, errors.New(res.FailureDetails)
+		}
+
 		resp, err := r.signerServer.MuSig2Sign(
 			ctx, reqType.MuSig2SignRequest,
 		)

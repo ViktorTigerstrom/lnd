@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -18,9 +19,11 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/lightningnetwork/lnd/channeldb"
+	"github.com/lightningnetwork/lnd/fn/v2"
 	"github.com/lightningnetwork/lnd/keychain"
 	"github.com/lightningnetwork/lnd/lncfg"
 	"github.com/lightningnetwork/lnd/lnrpc"
+	"github.com/lightningnetwork/lnd/lnrpc/signrpc"
 	"github.com/lightningnetwork/lnd/lntypes"
 	"github.com/lightningnetwork/lnd/lnwallet"
 	"github.com/lightningnetwork/lnd/lnwire"
@@ -52,6 +55,10 @@ type Validator struct {
 	remoteSignerDB RemoteSignerDB
 	accounts       []*walletrpc.Account
 
+	// muSig2Packets holds the transaction packets for MuSig2Sessions.
+	// The key for the Map is the hex string formatted MuSig2 Session ID.
+	muSig2Packets map[string]*psbt.Packet
+
 	mu sync.Mutex
 }
 
@@ -62,11 +69,12 @@ func NewValidator(remoteSignerDB RemoteSignerDB,
 	return &Validator{
 		remoteSignerDB: remoteSignerDB,
 		network:        network,
+		muSig2Packets:  make(map[string]*psbt.Packet),
 	}
 }
 
-// ValidatePSBT always determines that the provided SignPsbtRequest should be
-// signed.
+// ValidatePSBT determines whether the provided SignPsbtRequest should be signed
+// or not.
 func (r *Validator) ValidatePSBT(ctx context.Context,
 	req *walletrpc.SignPsbtRequest) (*ValidationResult, error) {
 
@@ -76,6 +84,41 @@ func (r *Validator) ValidatePSBT(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
+
+	return r.validatePacket(ctx, packet)
+}
+
+// ValidateMuSig2Sign determines whether the provided MuSig2SignRequest should
+// be signed or not.
+func (r *Validator) ValidateMuSig2Sign(ctx context.Context,
+	req *signrpc.MuSig2SignRequest) (*ValidationResult, error) {
+
+	packet, err := r.getMuSig2Packet(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	return r.validatePacket(ctx, packet)
+}
+
+// getMuSig2Packet fetches the transaction packet for the MuSig2SignRequest.
+func (r *Validator) getMuSig2Packet(_ context.Context,
+	req *signrpc.MuSig2SignRequest) (*psbt.Packet, error) {
+
+	sessionIDStr := hex.EncodeToString(req.GetSessionId())
+
+	packet, ok := r.muSig2Packets[sessionIDStr]
+	if !ok {
+		return nil, errors.New("no transaction metadata found for " +
+			"the MuSig2Session")
+	}
+
+	return packet, nil
+}
+
+// validatePacket will validate if the passed packet should be signed or not.
+func (r *Validator) validatePacket(ctx context.Context,
+	packet *psbt.Packet) (*ValidationResult, error) {
 
 	transactionType, err := r.getTransactionType(packet)
 	if err != nil {
@@ -630,17 +673,13 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 				return nil, err
 			}
 
-			// TODO: THIS MUST BE REPLACED FOR TAPROOT
-			// input.AuxTapLeaf{}
-			// With:
-			// fn.FlattenOption(remoteAuxLeaf),
 			toLocalScript, err := lnwallet.CommitScriptToSelf(
 				commitmentInfo.ChanType,
 				!commitmentInfo.IsLocalInitiator,
 				commitmentInfo.CommitmentKeys.ToLocalKey,
 				commitmentInfo.CommitmentKeys.RevocationKey,
 				cpMetadata.CsvDelay, cpMetadata.LeaseExpiry,
-				input.AuxTapLeaf{},
+				cpMetadata.AuxLeaf,
 			)
 			if err != nil {
 				return nil, err
@@ -687,15 +726,11 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 				return nil, err
 			}
 
-			// TODO: THIS MUST BE REPLACED FOR TAPROOT
-			// input.AuxTapLeaf{}
-			// With:
-			// fn.FlattenOption(remoteAuxLeaf),
 			toRemoteScript, _, err := lnwallet.CommitScriptToRemote(
 				commitmentInfo.ChanType,
 				!commitmentInfo.IsLocalInitiator,
 				commitmentInfo.CommitmentKeys.ToRemoteKey,
-				cpMetadata.LeaseExpiry, input.AuxTapLeaf{},
+				cpMetadata.LeaseExpiry, cpMetadata.AuxLeaf,
 			)
 			if err != nil {
 				return nil, err
@@ -736,15 +771,11 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 				return nil, err
 			}
 
-			// TODO: THIS MUST BE REPLACED FOR TAPROOT
-			// input.AuxTapLeaf{}
-			// With:
-			// fn.FlattenOption(remoteAuxLeaf),
 			htlcScriptInfo, err := lnwallet.GenHtlcScript(
 				commitmentInfo.ChanType, true, lntypes.Remote,
 				htlcMetadata.CltvExpiry, htlcMetadata.RHash,
 				commitmentInfo.CommitmentKeys,
-				input.AuxTapLeaf{},
+				htlcMetadata.AuxLeaf,
 			)
 			if err != nil {
 				return nil, err
@@ -807,15 +838,11 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 				return nil, err
 			}
 
-			// TODO: THIS MUST BE REPLACED FOR TAPROOT
-			// input.AuxTapLeaf{}
-			// With:
-			// fn.FlattenOption(remoteAuxLeaf),
 			htlcScriptInfo, err := lnwallet.GenHtlcScript(
 				commitmentInfo.ChanType, false, lntypes.Remote,
 				htlcMetadata.CltvExpiry, htlcMetadata.RHash,
 				commitmentInfo.CommitmentKeys,
-				input.AuxTapLeaf{},
+				htlcMetadata.AuxLeaf,
 			)
 			if err != nil {
 				return nil, err
@@ -863,7 +890,7 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 				return nil, err
 			}
 
-			_, remoteAnchor, err := lnwallet.CommitScriptAnchors(
+			lAnchor, rAnchor, err := lnwallet.CommitScriptAnchors(
 				commitmentInfo.ChanType,
 				commitmentInfo.localChanCfg,
 				commitmentInfo.remoteChanCfg,
@@ -873,8 +900,14 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 				return nil, err
 			}
 
+			// See https://github.com/lightningnetwork/lnd/blob/ea050d06f05b2694b4e4dcc12593ed245c2d7e82/lnwallet/channel.go#L8656-L8659
+			if commitmentInfo.ChanType.IsTaproot() {
+				//nolint:ineffassign
+				lAnchor, rAnchor = rAnchor, lAnchor
+			}
+
 			scriptMatches := bytes.Equal(
-				remoteAnchor.PkScript(),
+				rAnchor.PkScript(),
 				packet.UnsignedTx.TxOut[i].PkScript,
 			)
 
@@ -915,7 +948,7 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 				return nil, err
 			}
 
-			localAnchor, _, err := lnwallet.CommitScriptAnchors(
+			lAnchor, rAnchor, err := lnwallet.CommitScriptAnchors(
 				commitmentInfo.ChanType,
 				commitmentInfo.localChanCfg,
 				commitmentInfo.remoteChanCfg,
@@ -925,8 +958,14 @@ func (r *Validator) validateRemoteCommitment(ctx context.Context,
 				return nil, err
 			}
 
+			// See https://github.com/lightningnetwork/lnd/blob/ea050d06f05b2694b4e4dcc12593ed245c2d7e82/lnwallet/channel.go#L8656-L8659
+			if commitmentInfo.ChanType.IsTaproot() {
+				//nolint:ineffassign
+				lAnchor, rAnchor = rAnchor, lAnchor
+			}
+
 			scriptMatches := bytes.Equal(
-				localAnchor.PkScript(),
+				lAnchor.PkScript(),
 				packet.UnsignedTx.TxOut[i].PkScript,
 			)
 
@@ -957,15 +996,18 @@ type ChannelPartyOutputMetadata struct {
 	CommitPoint *btcec.PublicKey
 	CsvDelay    uint32
 	LeaseExpiry uint32
+	AuxLeaf     input.AuxTapLeaf
 }
 
 func NewChannelPartyOutputMetadata(commitPoint *btcec.PublicKey,
-	csvDelay, leaseExpiry uint32) (*ChannelPartyOutputMetadata, error) {
+	csvDelay, leaseExpiry uint32,
+	auxLeaf input.AuxTapLeaf) (*ChannelPartyOutputMetadata, error) {
 
 	return &ChannelPartyOutputMetadata{
 		CommitPoint: commitPoint,
 		CsvDelay:    csvDelay,
 		LeaseExpiry: leaseExpiry,
+		AuxLeaf:     auxLeaf,
 	}, nil
 }
 
@@ -973,15 +1015,17 @@ type HTLCOutputMetadata struct {
 	CommitPoint *btcec.PublicKey
 	CltvExpiry  uint32
 	RHash       [32]byte
+	AuxLeaf     input.AuxTapLeaf
 }
 
 func NewHTLCOutputMetadata(commitPoint *btcec.PublicKey, cltvExpiry uint32,
-	rHash [32]byte) (*HTLCOutputMetadata, error) {
+	rHash [32]byte, auxLeaf input.AuxTapLeaf) (*HTLCOutputMetadata, error) {
 
 	return &HTLCOutputMetadata{
 		CommitPoint: commitPoint,
 		CltvExpiry:  cltvExpiry,
 		RHash:       rHash,
+		AuxLeaf:     auxLeaf,
 	}, nil
 }
 
@@ -1002,10 +1046,11 @@ type SecondLevelHTLCOutputMetadata struct {
 	CsvDelay        uint32
 	LeaseExpiry     uint32
 	FundingOutpoint *wire.OutPoint
+	AuxLeaf         input.AuxTapLeaf
 }
 
 func NewSecondLevelHTLCOutputMetadata(commitPoint *btcec.PublicKey,
-	fundingOutpoint *wire.OutPoint,
+	fundingOutpoint *wire.OutPoint, auxLeaf input.AuxTapLeaf,
 	csvDelay, leaseExpiry uint32) (*SecondLevelHTLCOutputMetadata, error) {
 
 	return &SecondLevelHTLCOutputMetadata{
@@ -1013,6 +1058,7 @@ func NewSecondLevelHTLCOutputMetadata(commitPoint *btcec.PublicKey,
 		FundingOutpoint: fundingOutpoint,
 		CsvDelay:        csvDelay,
 		LeaseExpiry:     leaseExpiry,
+		AuxLeaf:         auxLeaf,
 	}, nil
 }
 
@@ -1020,10 +1066,13 @@ func (r *Validator) extractChannelPartyOutputMetadata(
 	unknowns input.SignInfo) (*ChannelPartyOutputMetadata, error) {
 
 	var (
-		commitPoint                           *btcec.PublicKey
-		csvDelay, leaseExpiry                 uint32
-		fCommitPoint, fCsvDelay, fLeaseExpiry bool
+		commitPoint                                     *btcec.PublicKey
+		csvDelay, leaseExpiry                           uint32
+		fCommitPoint, fCsvDelay, fLeaseExpiry, fAuxLeaf bool
+		auxLeaf                                         input.AuxTapLeaf
 	)
+
+	auxLeaf = fn.None[txscript.TapLeaf]()
 
 	for _, unknown := range unknowns {
 		k := unknown.Key
@@ -1071,6 +1120,20 @@ func (r *Validator) extractChannelPartyOutputMetadata(
 
 			fLeaseExpiry = true
 			leaseExpiry = expiry
+
+		case bytes.Equal(k, input.PsbtKeyTypeOutputAuxLeaf):
+			if fAuxLeaf {
+				return nil, fmt.Errorf("multiple aux leaves " +
+					"found in channel party output")
+			}
+
+			auxLeafRes, err := input.BytesToAuxLeaf(unknown.Value)
+			if err != nil {
+				return nil, err
+			}
+
+			fAuxLeaf = true
+			auxLeaf = auxLeafRes
 		}
 	}
 
@@ -1081,7 +1144,9 @@ func (r *Validator) extractChannelPartyOutputMetadata(
 			fLeaseExpiry)
 	}
 
-	return NewChannelPartyOutputMetadata(commitPoint, csvDelay, leaseExpiry)
+	return NewChannelPartyOutputMetadata(
+		commitPoint, csvDelay, leaseExpiry, auxLeaf,
+	)
 }
 
 func (r *Validator) extractHTLCOutputMetadata(
@@ -1091,9 +1156,12 @@ func (r *Validator) extractHTLCOutputMetadata(
 		commitPoint *btcec.PublicKey
 		cltvExpiry  uint32
 		rHash       [32]byte
+		auxLeaf     input.AuxTapLeaf
 
-		fCommitPoint, fCltvExpiry, fRHash bool
+		fCommitPoint, fCltvExpiry, fRHash, fAuxLeaf bool
 	)
+
+	auxLeaf = fn.None[txscript.TapLeaf]()
 
 	for _, unknown := range unknowns {
 		k := unknown.Key
@@ -1140,6 +1208,20 @@ func (r *Validator) extractHTLCOutputMetadata(
 
 			fRHash = true
 			copy(rHash[:], unknown.Value)
+
+		case bytes.Equal(k, input.PsbtKeyTypeOutputAuxLeaf):
+			if fAuxLeaf {
+				return nil, fmt.Errorf("multiple aux leaves " +
+					"found in HTLC output")
+			}
+
+			auxLeafRes, err := input.BytesToAuxLeaf(unknown.Value)
+			if err != nil {
+				return nil, err
+			}
+
+			fAuxLeaf = true
+			auxLeaf = auxLeafRes
 		}
 	}
 
@@ -1149,7 +1231,7 @@ func (r *Validator) extractHTLCOutputMetadata(
 			"r hash: %v", fCommitPoint, fCltvExpiry, fRHash)
 	}
 
-	return NewHTLCOutputMetadata(commitPoint, cltvExpiry, rHash)
+	return NewHTLCOutputMetadata(commitPoint, cltvExpiry, rHash, auxLeaf)
 }
 
 func (r *Validator) extractAnchorOutputMetadata(
@@ -1195,9 +1277,13 @@ func (r *Validator) extractSecondLevelHTLCOutputMetadata(
 		commitPoint           *btcec.PublicKey
 		fundingOutpoint       *wire.OutPoint
 		csvDelay, leaseExpiry uint32
+		auxLeaf               input.AuxTapLeaf
 
-		fCommitPoint, fFundingOutpoint, fCsvDelay, fLeaseExpiry bool
+		fCommitPoint, fFundingOutpoint, fCsvDelay, fLeaseExpiry,
+		fAuxLeaf bool
 	)
+
+	auxLeaf = fn.None[txscript.TapLeaf]()
 
 	for _, unknown := range unknowns {
 		k := unknown.Key
@@ -1266,6 +1352,20 @@ func (r *Validator) extractSecondLevelHTLCOutputMetadata(
 
 			fLeaseExpiry = true
 			leaseExpiry = expiry
+
+		case bytes.Equal(k, input.PsbtKeyTypeOutputAuxLeaf):
+			if fAuxLeaf {
+				return nil, fmt.Errorf("multiple aux leaves " +
+					"found in second level HTLC output")
+			}
+
+			auxLeafRes, err := input.BytesToAuxLeaf(unknown.Value)
+			if err != nil {
+				return nil, err
+			}
+
+			fAuxLeaf = true
+			auxLeaf = auxLeafRes
 		}
 	}
 
@@ -1278,7 +1378,7 @@ func (r *Validator) extractSecondLevelHTLCOutputMetadata(
 	}
 
 	return NewSecondLevelHTLCOutputMetadata(
-		commitPoint, fundingOutpoint, csvDelay, leaseExpiry,
+		commitPoint, fundingOutpoint, auxLeaf, csvDelay, leaseExpiry,
 	)
 }
 
@@ -1537,17 +1637,13 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 				return nil, err
 			}
 
-			// TODO: THIS MUST BE REPLACED FOR TAPROOT
-			// input.AuxTapLeaf{}
-			// With:
-			// fn.FlattenOption(remoteAuxLeaf),
 			toLocalScript, err := lnwallet.CommitScriptToSelf(
 				commitmentInfo.ChanType,
 				commitmentInfo.IsLocalInitiator,
 				commitmentInfo.CommitmentKeys.ToLocalKey,
 				commitmentInfo.CommitmentKeys.RevocationKey,
 				cpMetadata.CsvDelay, cpMetadata.LeaseExpiry,
-				input.AuxTapLeaf{},
+				cpMetadata.AuxLeaf,
 			)
 			if err != nil {
 				return nil, err
@@ -1594,15 +1690,11 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 				return nil, err
 			}
 
-			// TODO: THIS MUST BE REPLACED FOR TAPROOT
-			// input.AuxTapLeaf{}
-			// With:
-			// fn.FlattenOption(remoteAuxLeaf),
 			toRemoteScript, _, err := lnwallet.CommitScriptToRemote(
 				commitmentInfo.ChanType,
 				commitmentInfo.IsLocalInitiator,
 				commitmentInfo.CommitmentKeys.ToRemoteKey,
-				cpMetadata.LeaseExpiry, input.AuxTapLeaf{},
+				cpMetadata.LeaseExpiry, cpMetadata.AuxLeaf,
 			)
 			if err != nil {
 				return nil, err
@@ -1643,15 +1735,11 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 				return nil, err
 			}
 
-			// TODO: THIS MUST BE REPLACED FOR TAPROOT
-			// input.AuxTapLeaf{}
-			// With:
-			// fn.FlattenOption(remoteAuxLeaf),
 			htlcScriptInfo, err := lnwallet.GenHtlcScript(
 				commitmentInfo.ChanType, true, lntypes.Local,
 				htlcMetadata.CltvExpiry, htlcMetadata.RHash,
 				commitmentInfo.CommitmentKeys,
-				input.AuxTapLeaf{},
+				htlcMetadata.AuxLeaf,
 			)
 			if err != nil {
 				return nil, err
@@ -1714,15 +1802,11 @@ func (r *Validator) validateLocalCommitment(ctx context.Context,
 				return nil, err
 			}
 
-			// TODO: THIS MUST BE REPLACED FOR TAPROOT
-			// input.AuxTapLeaf{}
-			// With:
-			// fn.FlattenOption(remoteAuxLeaf),
 			htlcScriptInfo, err := lnwallet.GenHtlcScript(
 				commitmentInfo.ChanType, false, lntypes.Local,
 				htlcMetadata.CltvExpiry, htlcMetadata.RHash,
 				commitmentInfo.CommitmentKeys,
-				input.AuxTapLeaf{},
+				htlcMetadata.AuxLeaf,
 			)
 			if err != nil {
 				return nil, err
@@ -1887,8 +1971,6 @@ func (r *Validator) validateCooperativeClose(ctx context.Context,
 		return nil, err
 	}
 
-	log.Infof("require our output in coop-close: %v", requireOurOutput)
-
 	// If an output was trimmed checks if the to_local output value
 	// in our last commitment tx was above the to_remote value.
 	if len(packet.Outputs) == 1 && !requireOurOutput {
@@ -1896,6 +1978,8 @@ func (r *Validator) validateCooperativeClose(ctx context.Context,
 		// the closing tx.
 		return ValidationSuccessResult(), nil
 	}
+
+	log.Infof("Requiring that our output exists in coop-close")
 
 	// Else the tx should contain our to_local output. We therefore loop
 	// over all outputs until we find our to_local output, which is either
@@ -2040,10 +2124,6 @@ func (r *Validator) validateLocalSecondLevelHTLCTx(ctx context.Context,
 				return nil, err
 			}
 
-			// TODO: THIS MUST BE REPLACED FOR TAPROOT
-			// input.AuxTapLeaf{}
-			// With:
-			// fn.FlattenOption(remoteAuxLeaf),
 			secondLevelScript, err := lnwallet.SecondLevelHtlcScript(
 				commitmentInfo.ChanType,
 				commitmentInfo.IsLocalInitiator,
@@ -2051,7 +2131,7 @@ func (r *Validator) validateLocalSecondLevelHTLCTx(ctx context.Context,
 				commitmentInfo.CommitmentKeys.ToLocalKey,
 				metadata.CommitPoint, metadata.CsvDelay,
 				metadata.LeaseExpiry, *metadata.FundingOutpoint,
-				input.AuxTapLeaf{},
+				metadata.AuxLeaf,
 			)
 			if err != nil {
 				return nil, err
@@ -2175,10 +2255,6 @@ func (r *Validator) validateRemoteSecondLevelHTLCTx(ctx context.Context,
 		return nil, err
 	}
 
-	// TODO: THIS MUST BE REPLACED FOR TAPROOT
-	// input.AuxTapLeaf{}
-	// With:
-	// fn.FlattenOption(remoteAuxLeaf),
 	secondLevelScript, err := lnwallet.SecondLevelHtlcScript(
 		commitmentInfo.ChanType,
 		commitmentInfo.IsLocalInitiator,
@@ -2186,7 +2262,7 @@ func (r *Validator) validateRemoteSecondLevelHTLCTx(ctx context.Context,
 		commitmentInfo.CommitmentKeys.ToLocalKey,
 		metadata.CommitPoint, metadata.CsvDelay,
 		metadata.LeaseExpiry, *metadata.FundingOutpoint,
-		input.AuxTapLeaf{},
+		metadata.AuxLeaf,
 	)
 	if err != nil {
 		return nil, err
@@ -2288,6 +2364,11 @@ func (r *Validator) AddMetadata(ctx context.Context,
 			ctx, reqType.Accounts.GetAccounts(),
 		)
 
+	case *walletrpc.MetadataRequest_MuSig_2SessionInfo:
+		return r.AddMuSig2SessionMetadata(
+			ctx, reqType.MuSig_2SessionInfo,
+		)
+
 	default:
 		// When we don't know the metadata type, we log an error but
 		// return nil, as the watch-only node might be using a newer
@@ -2307,6 +2388,38 @@ func (r *Validator) AddAccountsMetadata(_ context.Context,
 	r.accounts = accounts
 
 	return nil
+}
+
+func (r *Validator) AddMuSig2SessionMetadata(ctx context.Context,
+	muSig2Info *walletrpc.MuSig2Info) error {
+
+	sessionIdStr, packet, err := r.extractMuSig2SessionInfo(ctx, muSig2Info)
+	if err != nil {
+		return err
+	}
+
+	_, ok := r.muSig2Packets[sessionIdStr]
+	if ok {
+		return fmt.Errorf("metadata already added for session: %s",
+			sessionIdStr)
+	}
+
+	r.muSig2Packets[sessionIdStr] = packet
+
+	return nil
+}
+
+func (r *Validator) extractMuSig2SessionInfo(_ context.Context,
+	muSig2Info *walletrpc.MuSig2Info) (string, *psbt.Packet, error) {
+
+	packet, err := psbt.NewFromRawBytes(
+		bytes.NewReader(muSig2Info.FundedPsbt), false,
+	)
+	if err != nil {
+		return "", nil, err
+	}
+
+	return hex.EncodeToString(muSig2Info.SessionId), packet, nil
 }
 
 func (r *Validator) AddFundingMetadata(ctx context.Context,

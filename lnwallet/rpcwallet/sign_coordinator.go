@@ -726,6 +726,61 @@ func (s *SignCoordinator) ForwardLocalCommitment(commitTx *wire.MsgTx,
 	return err
 }
 
+// ForwardMuSig2Info sends the transaction packet for the referenced
+// MuSig2Session to the remote signer.
+//
+// Note: this is part of the RemoteSignerInformer interface.
+func (s *SignCoordinator) ForwardMuSig2Info(muSig2SessionId []byte,
+	commitTx *wire.MsgTx, signDesc *input.SignDescriptor) error {
+
+	packet, err := packetFromTx(commitTx)
+	if err != nil {
+		return fmt.Errorf("error converting TX into PSBT: %w", err)
+	}
+
+	err = input.MaybeEnrichPsbt(
+		packet, signDesc.OutSignInfo, signDesc.TransactionType,
+	)
+	if err != nil {
+		return fmt.Errorf("error enriching PSBT outputs: %w", err)
+	}
+
+	var buf bytes.Buffer
+	if err := packet.Serialize(&buf); err != nil {
+		return fmt.Errorf("error serializing PSBT: %w", err)
+	}
+
+	muSig2Info := &walletrpc.MuSig2Info{
+		SessionId:  muSig2SessionId,
+		FundedPsbt: buf.Bytes(),
+	}
+
+	metaData := &walletrpc.MetadataRequest{
+		MetadataType: &walletrpc.MetadataRequest_MuSig_2SessionInfo{
+			MuSig_2SessionInfo: muSig2Info,
+		},
+	}
+
+	req := &walletrpc.SignCoordinatorRequest_MetadataRequest{
+		MetadataRequest: metaData,
+	}
+
+	_, err = processRequest(
+		s, noTimeout,
+		func(reqId uint64) walletrpc.SignCoordinatorRequest {
+			return walletrpc.SignCoordinatorRequest{
+				RequestId:       reqId,
+				SignRequestType: req,
+			}
+		},
+		func(resp *signerResponse) bool {
+			return resp.GetMetadataReceived()
+		},
+	)
+
+	return err
+}
+
 // ForwardFundingInfo sends the information regarding the channel when
 // channel has been funded and has a valid funding outpoint.
 //

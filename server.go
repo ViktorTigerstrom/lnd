@@ -1390,9 +1390,10 @@ func newServer(cfg *Config, listenAddrs []net.Addr,
 
 			return &pc.Incoming
 		},
-		AuxLeafStore: implCfg.AuxLeafStore,
-		AuxSigner:    implCfg.AuxSigner,
-		AuxResolver:  implCfg.AuxContractResolver,
+		AuxLeafStore:         implCfg.AuxLeafStore,
+		AuxSigner:            implCfg.AuxSigner,
+		AuxResolver:          implCfg.AuxContractResolver,
+		RemoteSignerInformer: rsInformer,
 	}, dbs.ChanStateDB)
 
 	// Select the configuration and funding parameters for Bitcoin.

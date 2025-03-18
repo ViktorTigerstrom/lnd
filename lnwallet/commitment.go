@@ -435,27 +435,29 @@ func SecondLevelHtlcScript(chanType channeldb.ChannelType, initiator bool,
 	csvDelay, leaseExpiry uint32, fundingOutpoint wire.OutPoint,
 	auxLeaf input.AuxTapLeaf) (input.ScriptDescriptor, error) {
 
-	fundingPointUnknown, err := input.FundingOutpoint(fundingOutpoint)
-	if err != nil {
-		return nil, err
-	}
-
 	// Create a SignInfo with metadata for the signer.
 	signInfo := input.UnknownOptions(
 		input.SecondLeveLHTLCOutput(),
 		input.CommitPoint(commitPoint),
 		input.CsvDelay(csvDelay),
 		input.LeaseExpiry(leaseExpiry),
-		fundingPointUnknown,
+		input.FundingOutpoint(fundingOutpoint),
+		input.AuxLeafOption(auxLeaf),
 	)
 
 	switch {
 	// For taproot channels, the pkScript is a segwit v1 p2tr output.
 	case chanType.IsTaproot():
-		// TODO: This must pass the signInfo and use that.
-		return input.TaprootSecondLevelScriptTree(
+		scriptTree, err := input.TaprootSecondLevelScriptTree(
 			revocationKey, delayKey, csvDelay, auxLeaf,
 		)
+		if err != nil {
+			return nil, err
+		}
+
+		scriptTree.PsbtSignInfo = signInfo
+
+		return scriptTree, nil
 
 	// If we are the initiator of a leased channel, then we have an
 	// additional CLTV requirement in addition to the usual CSV
@@ -1040,6 +1042,7 @@ func CreateCommitTx(chanType channeldb.ChannelType,
 			input.CommitPoint(keyRing.CommitPoint),
 			input.CsvDelay(uint32(localChanCfg.CsvDelay)),
 			input.LeaseExpiry(leaseExpiry),
+			input.AuxLeafOption(fn.FlattenOption(localAuxLeaf)),
 		))
 	}
 
@@ -1055,6 +1058,7 @@ func CreateCommitTx(chanType channeldb.ChannelType,
 			input.CommitPoint(keyRing.CommitPoint),
 			input.CsvDelay(uint32(localChanCfg.CsvDelay)),
 			input.LeaseExpiry(leaseExpiry),
+			input.AuxLeafOption(fn.FlattenOption(remoteAuxLeaf)),
 		))
 	}
 
@@ -1239,6 +1243,7 @@ func genSegwitV0HtlcScript(chanType channeldb.ChannelType,
 		input.CltvExpiry(timeout),
 		input.CommitPoint(keyRing.CommitPoint),
 		input.RHash(rHash[:]),
+		input.AuxLeafOption(fn.None[txscript.TapLeaf]()),
 	)
 
 	return &WitnessScriptDesc{
@@ -1299,6 +1304,24 @@ func GenTaprootHtlcScript(isIncoming bool, whoseCommit lntypes.ChannelParty,
 			keyRing.RevocationKey, rHash[:], whoseCommit, auxLeaf,
 		)
 	}
+
+	var outputType input.UnknownOption
+	if isIncoming {
+		outputType = input.IncomingHTLCOutput()
+	} else {
+		outputType = input.OfferedHTLCOutput()
+	}
+
+	// Store the derivation info for the HTLC in its matching POutput.
+	signInfo := input.UnknownOptions(
+		outputType,
+		input.CltvExpiry(timeout),
+		input.CommitPoint(keyRing.CommitPoint),
+		input.RHash(rHash[:]),
+		input.AuxLeafOption(auxLeaf),
+	)
+
+	htlcScriptTree.PsbtSignInfo = signInfo
 
 	return htlcScriptTree, err
 }

@@ -14,6 +14,11 @@ type RemoteSignerInformer interface {
 	ForwardLocalCommitment(commitTx *wire.MsgTx,
 		signDesc *input.SignDescriptor) error
 
+	// ForwardMuSig2Info sends the transaction packet for the referenced
+	// MuSig2Session to the remote signer.
+	ForwardMuSig2Info(muSig2SessionId []byte, commitTx *wire.MsgTx,
+		signDesc *input.SignDescriptor) error
+
 	// ForwardFundingInfo sends the information regarding the channel when
 	// channel has been funded and has a valid funding outpoint.
 	ForwardFundingInfo(fundingPoint *wire.OutPoint,

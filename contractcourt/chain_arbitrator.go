@@ -229,6 +229,11 @@ type ChainArbitratorConfig struct {
 	// AuxResolver is an optional interface that can be used to modify the
 	// way contracts are resolved.
 	AuxResolver fn.Option[lnwallet.AuxContractResolver]
+
+	// RemoteSignerInformer is an optional component that can be used to
+	// inform the remote signer about the channel state for informational
+	// purposes only.
+	RemoteSignerInformer fn.Option[lnwallet.RemoteSignerInformer]
 }
 
 // ChainArbitrator is a sub-system that oversees the on-chain resolution of all
@@ -319,6 +324,14 @@ func (a *arbChannel) NewAnchorResolutions() (*lnwallet.AnchorResolutions,
 	a.c.cfg.AuxResolver.WhenSome(func(s lnwallet.AuxContractResolver) {
 		chanOpts = append(chanOpts, lnwallet.WithAuxResolver(s))
 	})
+	a.c.cfg.RemoteSignerInformer.WhenSome(
+		func(r lnwallet.RemoteSignerInformer) {
+			chanOpts = append(
+				chanOpts,
+				lnwallet.WithRemoteSignerInformer(r),
+			)
+		},
+	)
 
 	chanMachine, err := lnwallet.NewLightningChannel(
 		a.c.cfg.Signer, channel, nil, chanOpts...,
@@ -372,6 +385,14 @@ func (a *arbChannel) ForceCloseChan() (*wire.MsgTx, error) {
 	a.c.cfg.AuxResolver.WhenSome(func(s lnwallet.AuxContractResolver) {
 		chanOpts = append(chanOpts, lnwallet.WithAuxResolver(s))
 	})
+	a.c.cfg.RemoteSignerInformer.WhenSome(
+		func(r lnwallet.RemoteSignerInformer) {
+			chanOpts = append(
+				chanOpts,
+				lnwallet.WithRemoteSignerInformer(r),
+			)
+		},
+	)
 
 	// Finally, we'll force close the channel completing
 	// the force close workflow.

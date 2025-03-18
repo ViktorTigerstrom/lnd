@@ -1101,6 +1101,14 @@ func (f *Manager) advanceFundingState(channel *channeldb.OpenChannel,
 	f.cfg.AuxResolver.WhenSome(func(s lnwallet.AuxContractResolver) {
 		chanOpts = append(chanOpts, lnwallet.WithAuxResolver(s))
 	})
+	f.cfg.RemoteSignerInformer.WhenSome(
+		func(r lnwallet.RemoteSignerInformer) {
+			chanOpts = append(
+				chanOpts,
+				lnwallet.WithRemoteSignerInformer(r),
+			)
+		},
+	)
 
 	// We create the state-machine object which wraps the database state.
 	lnChannel, err := lnwallet.NewLightningChannel(
@@ -2473,8 +2481,6 @@ func (f *Manager) fundeeProcessFundingCreated(peer lnpeer.Peer,
 
 	f.cfg.RemoteSignerInformer.WhenSome(
 		func(informer lnwallet.RemoteSignerInformer) {
-			log.Errorf("!!!!!!!!!!!! INFORMING OF FUDNING INFO")
-
 			resrv := resCtx.reservation
 
 			err := informer.ForwardFundingInfo(
@@ -2491,11 +2497,6 @@ func (f *Manager) fundeeProcessFundingCreated(peer lnpeer.Peer,
 			}
 		},
 	)
-
-	// TODO: REMOVE!!!!
-	if f.cfg.RemoteSignerInformer.IsNone() {
-		log.Errorf("!!!!!!!!!!!! Remote signer informer is not set")
-	}
 
 	// Create the channel identifier without setting the active channel ID.
 	cid := newChanIdentifier(pendingChanID)

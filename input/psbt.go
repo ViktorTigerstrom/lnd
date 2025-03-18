@@ -7,7 +7,9 @@ import (
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/btcutil/psbt"
+	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/lightningnetwork/lnd/fn/v2"
 	"github.com/lightningnetwork/lnd/keychain"
 	"github.com/lightningnetwork/lnd/lntypes"
 	"io"
@@ -41,6 +43,7 @@ var (
 	PsbtKeyTypeOutputRemotePaymentBasePoint    = []byte{0x6e}
 	PsbtKeyTypeOutputRemoteDelayBasePoint      = []byte{0x6f}
 	PsbtKeyTypeOutputFundingPoint              = []byte{0x50}
+	PsbtKeyTypeOutputAuxLeaf                   = []byte{0x51}
 	PsbtKeyTypeOutputRemoteHtlcBasePoint       = []byte{0x70}
 	PsbtKeyRemoteCommitmentTransaction         = []byte{0x71}
 	PsbtKeyLocalCommitmentTransaction          = []byte{0x72}
@@ -172,11 +175,64 @@ func descBytes(fingerprint, coin uint32, desc *keychain.KeyDescriptor) []byte {
 	return msgBytes
 }
 
+// BytesToAuxLeaf coverts bytes to an AuxTapLeaf. If the passed []byte is empty,
+// an fn.None result will be returned.
+func BytesToAuxLeaf(auxLeafBytes []byte) (AuxTapLeaf, error) {
+	if len(auxLeafBytes) == 0 {
+		return fn.None[txscript.TapLeaf](), nil
+	}
+
+	// An AuxLeaf must contain at least one byte for the version, followed
+	// by the bytes for the script.
+	if len(auxLeafBytes) == 1 {
+		return fn.None[txscript.TapLeaf](), fmt.Errorf("the passed " +
+			"auxLeafBytes is not a correctly formated AuxLeaf")
+	}
+
+	versionByte := auxLeafBytes[0]
+	scriptBytes := auxLeafBytes[1:]
+	version := txscript.TapscriptLeafVersion(versionByte)
+
+	if version != txscript.BaseLeafVersion {
+		return fn.None[txscript.TapLeaf](), fmt.Errorf("the passed " +
+			"version of the auxLeafBytes isn't supprtoed")
+	}
+
+	tapLeaf := txscript.NewTapLeaf(version, scriptBytes)
+
+	return fn.Some[txscript.TapLeaf](tapLeaf), nil
+}
+
+// auxLeafToBytes coverts an AuxTapLeaf to bytes. If the passed AuxTapLeaf is an
+// fn.None option, an empty []byte will be returned.
+func auxLeafToBytes(auxLeaf AuxTapLeaf) []byte {
+	if auxLeaf.IsNone() {
+		return make([]byte, 0)
+	}
+
+	tapLeaf := auxLeaf.UnsafeFromSome()
+
+	auxLeafBytes := make([]byte, 1)
+
+	auxLeafBytes[0] = uint8(tapLeaf.LeafVersion)
+	auxLeafBytes = append(auxLeafBytes, tapLeaf.Script...)
+
+	return auxLeafBytes
+}
+
 // ChannelType returns an UnknownOption for the channel type.
 func ChannelType(chanType uint64) UnknownOption {
 	return wrapUnknownOption(
 		PsbtKeyTypeOutputChanType,
 		uint64Bytes(chanType),
+	)
+}
+
+// AuxLeafOption returns an UnknownOption for an AuxTapLeaf.
+func AuxLeafOption(auxLeaf AuxTapLeaf) UnknownOption {
+	return wrapUnknownOption(
+		PsbtKeyTypeOutputAuxLeaf,
+		auxLeafToBytes(auxLeaf),
 	)
 }
 
@@ -218,18 +274,11 @@ func CommitPoint(point *btcec.PublicKey) UnknownOption {
 }
 
 // FundingOutpoint returns an UnknownOption for the funding outpoint.
-func FundingOutpoint(fundingOutpoint wire.OutPoint) (UnknownOption, error) {
-	/*fundingOutpointBytes, err := fundingOutpointToBytes(fundingOutpoint)
-	if err != nil {
-		return nil, err
-	}*/
-
-	fundingOutpointBytes := []byte(fundingOutpoint.String())
+func FundingOutpoint(fundingOutpoint wire.OutPoint) UnknownOption {
 
 	return wrapUnknownOption(
-		PsbtKeyTypeOutputFundingPoint,
-		fundingOutpointBytes,
-	), nil
+		PsbtKeyTypeOutputFundingPoint, []byte(fundingOutpoint.String()),
+	)
 }
 
 // RHash returns an UnknownOption for the rHash.
@@ -361,8 +410,8 @@ func SecondLeveLHTLCOutput() UnknownOption {
 	)
 }
 
-// SecondLeveLHTLCOutput returns an UnknownOption for the second level HTLC
-// output type.
+// DefaultOutput returns an UnknownOption for any output that's not a channel
+// related output type.
 func DefaultOutput() UnknownOption {
 	return wrapUnknownOption(
 		PsbtKeyOutputTypeDefault, []byte{},

@@ -7,6 +7,7 @@ import (
 	"context"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/lightningnetwork/lnd/lncfg"
+	"github.com/lightningnetwork/lnd/lnrpc/signrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/walletrpc"
 )
 
@@ -28,6 +29,14 @@ func NewValidator(remoteSignerDB RemoteSignerDB,
 // signed.
 func (r *Validator) ValidatePSBT(_ context.Context,
 	_ *walletrpc.SignPsbtRequest) (*ValidationResult, error) {
+
+	return ValidationSuccessResult(), nil
+}
+
+// ValidateMuSig2Sign always determines that the provided ValidateMuSig2Sign
+// should be signed.
+func (r *Validator) ValidateMuSig2Sign(ctx context.Context,
+	req *signrpc.MuSig2SignRequest) (*ValidationResult, error) {
 
 	return ValidationSuccessResult(), nil
 }

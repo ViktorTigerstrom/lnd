@@ -551,6 +551,11 @@ message MetadataRequest {
         Informs the remote signer of the accounts the watch-only uses.
         */
         ListAccountsResponse accounts = 3;
+
+        /*
+        Informs the remote signer of the accounts the watch-only uses.
+        */
+        MuSig2Info mu_sig_2_session_info = 4;
     }
 }
 
@@ -579,6 +584,20 @@ message FundingInfo {
     The remote channel config of the channel.
      */
     lnrpc.ChannelConfig remote_channel_config = 5;
+}
+
+message MuSig2Info {
+    /*
+    The unique ID of the signing session that this metadata should be used for.
+    */
+    bytes session_id = 1;
+
+    /*
+    The PSBT that will be signed. The hash for the transaction included in the
+    PSBT, must match the message_digest in the MuSig2SignRequest that will be
+    sent to the remote signer once the transaction is requested to be signed.
+    */
+    bytes funded_psbt = 2;
 }
 
 message SignerError {

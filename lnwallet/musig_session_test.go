@@ -78,7 +78,7 @@ func (h *muSessionHarness) refreshSession(nodeName nodeType,
 func (h *muSessionHarness) SignCommitment(nodeName nodeType) *MusigPartialSig {
 	targetSession := h.selectSession(nodeName)
 
-	sig, err := targetSession.RemoteSession.SignCommit(h.bobCommit)
+	sig, err := targetSession.RemoteSession.SignCommit(h.bobCommit, nil)
 	require.NoError(h.t, err)
 
 	return sig

@@ -2331,6 +2331,25 @@
         "accounts": {
           "$ref": "#/definitions/walletrpcListAccountsResponse",
           "description": "Informs the remote signer of the accounts the watch-only uses."
+        },
+        "mu_sig_2_session_info": {
+          "$ref": "#/definitions/walletrpcMuSig2Info",
+          "description": "Informs the remote signer of the accounts the watch-only uses."
+        }
+      }
+    },
+    "walletrpcMuSig2Info": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "format": "byte",
+          "description": "The unique ID of the signing session that this metadata should be used for."
+        },
+        "funded_psbt": {
+          "type": "string",
+          "format": "byte",
+          "description": "The PSBT that will be signed. The hash for the transaction included in the\nPSBT, must match the message_digest in the MuSig2SignRequest that will be\nsent to the remote signer once the transaction is requested to be signed."
         }
       }
     },

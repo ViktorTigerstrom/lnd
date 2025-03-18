@@ -3,6 +3,7 @@ package validator
 import (
 	"context"
 	"github.com/lightningnetwork/lnd/lnrpc"
+	"github.com/lightningnetwork/lnd/lnrpc/signrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/walletrpc"
 )
 
@@ -60,6 +61,15 @@ type Validation interface {
 	// implemented by the Validator.
 	ValidatePSBT(ctx context.Context,
 		req *walletrpc.SignPsbtRequest) (*ValidationResult, error)
+
+	// ValidateMuSig2Sign determines whether the provided MuSig2SignRequest
+	// should be signed or rejected, based on the validation rules
+	// implemented by the Validator.
+	// Note that this needs to be preceded by a AddMetadata request which
+	// feeds the validator with the transaction packet for the specific
+	// MuSig2SignRequest.
+	ValidateMuSig2Sign(ctx context.Context,
+		req *signrpc.MuSig2SignRequest) (*ValidationResult, error)
 
 	// GetFeatures returns the features supported by the Validator
 	// implementation. This information helps the watch-only node

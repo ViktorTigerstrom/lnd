@@ -270,6 +270,16 @@ func (r *OutboundConnection) ForwardLocalCommitment(_ *wire.MsgTx,
 	return nil
 }
 
+// ForwardMuSig2Info sends the transaction packet for the referenced
+// MuSig2Session to the remote signer.
+//
+// Note: this is part of the RemoteSignerInformer interface.
+func (s *OutboundConnection) ForwardMuSig2Info(_ []byte,
+	_ *wire.MsgTx, _ *input.SignDescriptor) error {
+
+	return nil
+}
+
 // ForwardFundingInfo sends the information regarding the channel when
 // channel has been funded and has a valid funding outpoint.
 //

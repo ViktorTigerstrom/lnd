@@ -1033,7 +1033,6 @@ func (p *Brontide) loadActiveChannels(chans []*channeldb.OpenChannel) (
 				)
 			},
 		)
-
 		p.cfg.RemoteSignerInformer.WhenSome(
 			func(r lnwallet.RemoteSignerInformer) {
 				chanOpts = append(
@@ -4311,7 +4310,6 @@ func (p *Brontide) addActiveChannel(c *lnpeer.NewChannel) error {
 	p.cfg.AuxResolver.WhenSome(func(s lnwallet.AuxContractResolver) {
 		chanOpts = append(chanOpts, lnwallet.WithAuxResolver(s))
 	})
-
 	p.cfg.RemoteSignerInformer.WhenSome(
 		func(r lnwallet.RemoteSignerInformer) {
 			chanOpts = append(

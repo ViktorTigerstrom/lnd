@@ -780,10 +780,10 @@ type LightningChannel struct {
 	// way contracts are resolved.
 	auxResolver fn.Option[AuxContractResolver]
 
-	// remoteSignerInformer is an optional component that can be used to
+	// RemoteSignerInformer is an optional component that can be used to
 	// inform the remote signer about the channel state for informational
 	// purposes only.
-	rsInformer fn.Option[RemoteSignerInformer]
+	RemoteSignerInformer fn.Option[RemoteSignerInformer]
 
 	// Capacity is the total capacity of this channel.
 	Capacity btcutil.Amount
@@ -853,7 +853,7 @@ type channelOpts struct {
 	skipNonceInit bool
 }
 
-// WithLocalMusigNonces is used to bind an existing verification/local nonce to
+// WithRemoteSignerInformer is used to bind an existing verification/local nonce to
 // a new channel.
 func WithRemoteSignerInformer(rsInformer RemoteSignerInformer) ChannelOpt {
 	return func(o *channelOpts) {
@@ -960,15 +960,15 @@ func NewLightningChannel(signer input.Signer,
 	}
 
 	lc := &LightningChannel{
-		Signer:        signer,
-		leafStore:     opts.leafStore,
-		auxSigner:     opts.auxSigner,
-		auxResolver:   opts.auxResolver,
-		rsInformer:    opts.rsInformer,
-		sigPool:       sigPool,
-		currentHeight: localCommit.CommitHeight,
-		commitChains:  commitChains,
-		channelState:  state,
+		Signer:               signer,
+		leafStore:            opts.leafStore,
+		auxSigner:            opts.auxSigner,
+		auxResolver:          opts.auxResolver,
+		RemoteSignerInformer: opts.rsInformer,
+		sigPool:              sigPool,
+		currentHeight:        localCommit.CommitHeight,
+		commitChains:         commitChains,
+		channelState:         state,
 		commitBuilder: NewCommitmentBuilder(
 			state, opts.leafStore,
 		),
@@ -4099,7 +4099,7 @@ func (lc *LightningChannel) SignNextCommitment(
 		// just blank.
 		remoteSession := lc.musigSessions.RemoteSession
 		musig, err := remoteSession.SignCommit(
-			newCommitView.txn,
+			newCommitView.txn, lc.signDesc,
 		)
 		if err != nil {
 			close(cancelChan)
@@ -4221,7 +4221,7 @@ func (lc *LightningChannel) resignMusigCommit(
 	commitTx *wire.MsgTx) (lnwire.OptPartialSigWithNonceTLV, error) {
 
 	remoteSession := lc.musigSessions.RemoteSession
-	musig, err := remoteSession.SignCommit(commitTx)
+	musig, err := remoteSession.SignCommit(commitTx, lc.signDesc)
 	if err != nil {
 		var none lnwire.OptPartialSigWithNonceTLV
 		return none, err
@@ -5449,7 +5449,7 @@ func (lc *LightningChannel) ReceiveNewCommitment(commitSigs *CommitSigs) error {
 	// If we're using a remote signer that needs information about the
 	// current local commitment transaction, we also forward the local
 	// commitment transaction to the remote signer.
-	lc.rsInformer.WhenSome(func(rsInformer RemoteSignerInformer) {
+	lc.RemoteSignerInformer.WhenSome(func(rsInformer RemoteSignerInformer) {
 		// Ensure that we're passing the correct derivation info to the
 		// signer. Since the SignDescriptor is created when the channel
 		// object is initialized, and reused with every update, we clean
@@ -6583,8 +6583,8 @@ type TaprootSignedCommitTxInputs struct {
 // exported to give outside tooling the possibility to recreate the witness.
 // A key use case is generating the witness data for a commitment transaction
 // from a Static Channel Backup (SCB).
-func GetSignedCommitTx(inputs SignedCommitTxInputs,
-	signer input.Signer) (*wire.MsgTx, error) {
+func GetSignedCommitTx(inputs SignedCommitTxInputs, signer input.Signer,
+	rsInformer fn.Option[RemoteSignerInformer]) (*wire.MsgTx, error) {
 
 	commitTx := inputs.CommitTx.Copy()
 
@@ -6619,7 +6619,7 @@ func GetSignedCommitTx(inputs SignedCommitTxInputs,
 		musigSession := NewPartialMusigSession(
 			*localNonce, inputs.OurKey, inputs.TheirKey, signer,
 			inputs.SignDesc.Output, LocalMusigCommit,
-			tapscriptTweak,
+			tapscriptTweak, rsInformer,
 		)
 
 		var remoteSig lnwire.PartialSigWithNonce
@@ -6645,7 +6645,8 @@ func GetSignedCommitTx(inputs SignedCommitTxInputs,
 		// Now that the session has been finalized, we can generate our
 		// half of the signature for the state. We don't capture the
 		// sig as it's stored within the session.
-		if _, err := musigSession.SignCommit(commitTx); err != nil {
+		_, err = musigSession.SignCommit(commitTx, inputs.SignDesc)
+		if err != nil {
 			return nil, fmt.Errorf("unable to sign musig2 "+
 				"commitment: %w", err)
 		}
@@ -6712,11 +6713,6 @@ func (lc *LightningChannel) getSignedCommitTx() (*wire.MsgTx, error) {
 		SignDesc:  lc.signDesc,
 	}
 
-	// TODO remove this or below
-	inputs.SignDesc.TransactionType = input.UnknownOptions(
-		input.LocalCommitmentTransaction(),
-	)
-
 	if lc.channelState.ChanType.IsTaproot() {
 		inputs.Taproot = fn.Some(TaprootSignedCommitTxInputs{
 			CommitHeight:         lc.currentHeight,
@@ -6725,50 +6721,48 @@ func (lc *LightningChannel) getSignedCommitTx() (*wire.MsgTx, error) {
 		})
 	}
 
-	if !lc.channelState.ChanType.IsTaproot() {
-		// Populate the derivation info of our SignDescriptor so that we
-		// can pass it on to the signer.
-		localACKedIndex := lc.commitChains.Remote.tail().messageIndices.Local
-		localHtlcIndex := lc.commitChains.Remote.tail().ourHtlcIndex
+	// Populate the derivation info of our SignDescriptor so that we
+	// can pass it on to the signer.
+	localACKedIndex := lc.commitChains.Remote.tail().messageIndices.Local
+	localHtlcIndex := lc.commitChains.Remote.tail().ourHtlcIndex
 
-		commitSecret, err := lc.channelState.RevocationProducer.AtIndex(
-			lc.currentHeight,
-		)
-		if err != nil {
-			return nil, err
-		}
-		commitPoint := input.ComputeCommitmentPoint(commitSecret[:])
-		keyRing := DeriveCommitmentKeys(
-			commitPoint, lntypes.Local, lc.channelState.ChanType,
-			&lc.channelState.LocalChanCfg,
-			&lc.channelState.RemoteChanCfg,
-		)
+	commitSecret, err := lc.channelState.RevocationProducer.AtIndex(
+		lc.currentHeight,
+	)
+	if err != nil {
+		return nil, err
+	}
+	
+	commitPoint := input.ComputeCommitmentPoint(commitSecret[:])
+	keyRing := DeriveCommitmentKeys(
+		commitPoint, lntypes.Local, lc.channelState.ChanType,
+		&lc.channelState.LocalChanCfg,
+		&lc.channelState.RemoteChanCfg,
+	)
 
-		localCommitmentView, err := lc.fetchCommitmentView(
-			lntypes.Local, localACKedIndex, localHtlcIndex,
-			lc.updateLogs.Remote.logIndex,
-			lc.updateLogs.Remote.htlcCounter, keyRing,
-		)
-		if err != nil {
-			return nil, err
-		}
-
-		// Ensure that we're passing the correct derivation info to the
-		// signer. Since the SignDescriptor is created when the channel
-		// object is initialized, and reused with every update, we clean
-		// up after ourselves when we're finished signing.
-		lc.signDesc.OutSignInfo = localCommitmentView.signInfo
-		defer func() { lc.signDesc.OutSignInfo = []input.SignInfo{} }()
-
-		lc.signDesc.TransactionType = input.UnknownOptions(
-			input.LocalCommitmentTransaction(),
-		)
-
-		// TODO remove this or above
-		defer func() { lc.signDesc.TransactionType = nil }()
+	localCommitmentView, err := lc.fetchCommitmentView(
+		lntypes.Local, localACKedIndex, localHtlcIndex,
+		lc.updateLogs.Remote.logIndex,
+		lc.updateLogs.Remote.htlcCounter, keyRing,
+	)
+	if err != nil {
+		return nil, err
 	}
 
-	return GetSignedCommitTx(inputs, lc.Signer)
+	// Ensure that we're passing the correct derivation info to the
+	// signer. Since the SignDescriptor is created when the channel
+	// object is initialized, and reused with every update, we clean
+	// up after ourselves when we're finished signing.
+	lc.signDesc.OutSignInfo = localCommitmentView.signInfo
+	defer func() { lc.signDesc.OutSignInfo = []input.SignInfo{} }()
+
+	lc.signDesc.TransactionType = input.UnknownOptions(
+		input.LocalCommitmentTransaction(),
+	)
+
+	defer func() { lc.signDesc.TransactionType = nil }()
+
+	return GetSignedCommitTx(inputs, lc.Signer, lc.RemoteSignerInformer)
 }
 
 // CommitOutputResolution carries the necessary information required to allow
@@ -8506,35 +8500,35 @@ func (lc *LightningChannel) CreateCloseProposal(proposedFee btcutil.Amount,
 		return nil, nil, 0, err
 	}
 
+	// Ensure that we're passing the correct derivation info to the signer.
+	// Since the SignDescriptor is created when the channel object is
+	// initialized, and reused with every update, we clean up after
+	// ourselves when we're finished signing.
+	lc.signDesc.OutSignInfo = make(
+		[]input.SignInfo, len(closeTx.TxOut),
+	)
+	defer func() { lc.signDesc.OutSignInfo = []input.SignInfo{} }()
+
+	lc.signDesc.TransactionType = input.UnknownOptions(
+		input.CooperativeCloseTransaction(),
+	)
+	defer func() { lc.signDesc.TransactionType = nil }()
+
 	// If we have a co-op close musig session, then this is a taproot
 	// channel, so we'll generate a _partial_ signature.
 	var sig input.Signature
 	if opts.musigSession != nil {
-		sig, err = opts.musigSession.SignCommit(closeTx)
+		sig, err = opts.musigSession.SignCommit(closeTx, lc.signDesc)
 		if err != nil {
 			return nil, nil, 0, err
 		}
 	} else {
-		// For regular channels, ensure that we're passing the correct
-		// derivation info to the signer. Since the SignDescriptor is
-		// created when the channel object is initialized, and reused
-		// with every update, we clean up after ourselves when we're
-		// finished signing.
-		lc.signDesc.OutSignInfo = make(
-			[]input.SignInfo, len(closeTx.TxOut),
-		)
-		defer func() { lc.signDesc.OutSignInfo = []input.SignInfo{} }()
 
 		// Finally, sign the completed cooperative closure transaction.
 		// As the initiator we'll simply send our signature over to the
 		// remote party, using the generated txid to be notified once
 		// the closure transaction has been confirmed.
 		lc.signDesc.SigHashes = input.NewTxSigHashesV0Only(closeTx)
-
-		lc.signDesc.TransactionType = input.UnknownOptions(
-			input.CooperativeCloseTransaction(),
-		)
-		defer func() { lc.signDesc.TransactionType = nil }()
 
 		sig, err = lc.Signer.SignOutputRaw(closeTx, lc.signDesc)
 		if err != nil {
@@ -9997,13 +9991,14 @@ func (lc *LightningChannel) InitRemoteMusigNonces(remoteNonce *musig2.Nonces,
 	// TODO(roasbeef): propagate rename of signing and verification nonces
 
 	sessionCfg := &MusigSessionCfg{
-		LocalKey:       localChanCfg.MultiSigKey,
-		RemoteKey:      remoteChanCfg.MultiSigKey,
-		LocalNonce:     *localNonce,
-		RemoteNonce:    *remoteNonce,
-		Signer:         lc.Signer,
-		InputTxOut:     &lc.fundingOutput,
-		TapscriptTweak: lc.channelState.TapscriptRoot,
+		LocalKey:             localChanCfg.MultiSigKey,
+		RemoteKey:            remoteChanCfg.MultiSigKey,
+		LocalNonce:           *localNonce,
+		RemoteNonce:          *remoteNonce,
+		Signer:               lc.Signer,
+		InputTxOut:           &lc.fundingOutput,
+		TapscriptTweak:       lc.channelState.TapscriptRoot,
+		RemoteSignerInformer: lc.RemoteSignerInformer,
 	}
 	lc.musigSessions = NewMusigPairSession(
 		sessionCfg,
