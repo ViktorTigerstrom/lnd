@@ -148,6 +148,12 @@ release-install:
 	env CGO_ENABLED=0 $(GOINSTALL) -v -trimpath -ldflags="$(RELEASE_LDFLAGS)" -tags="$(RELEASE_TAGS)" $(PKG)/cmd/lncli
 	env CGO_ENABLED=0 $(GOINSTALL) -v -trimpath -ldflags="$(RELEASE_LDFLAGS)" -tags="$(LND_SIGNER_TAGS)" $(PKG)/cmd/lndsigner
 
+#? lndsigner-install: Build and install lncli and lndsigner binaries release binaries, place them in $GOPATH/bin
+lndsigner-install:
+	@$(call print, "Installing release lndsigner and lncli.")
+	env CGO_ENABLED=0 $(GOINSTALL) -v -trimpath -ldflags="$(RELEASE_LDFLAGS)" -tags="$(LND_SIGNER_TAGS)" $(PKG)/cmd/lncli
+	env CGO_ENABLED=0 $(GOINSTALL) -v -trimpath -ldflags="$(RELEASE_LDFLAGS)" -tags="$(LND_SIGNER_TAGS)" $(PKG)/cmd/lndsigner
+
 #? release: Build the full set of reproducible release binaries for all supported platforms
 # Make sure the generated mobile RPC stubs don't influence our vendor package
 # by removing them first in the clean-mobile target.
