@@ -1,4 +1,4 @@
-package sqldbv2
+package sqldb
 
 import "github.com/btcsuite/btclog/v2"
 

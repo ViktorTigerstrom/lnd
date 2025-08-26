@@ -1,6 +1,6 @@
 //go:build !js && !(windows && (arm || 386)) && !(linux && (ppc64 || mips || mipsle || mips64)) && !(netbsd || openbsd)
 
-package sqldbv2
+package sqldb
 
 import (
 	"context"

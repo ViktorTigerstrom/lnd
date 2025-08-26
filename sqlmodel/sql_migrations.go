@@ -9,7 +9,7 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database"
 	"github.com/golang-migrate/migrate/v4/database/pgx/v5"
-	sqldb "github.com/lightningnetwork/lnd/sqldbv2"
+	"github.com/lightningnetwork/lnd/sqldb/v2"
 	"github.com/lightningnetwork/lnd/sqlmodel/sqlc"
 )
 

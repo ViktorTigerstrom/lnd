@@ -1,6 +1,6 @@
 //go:build !test_db_postgres
 
-package sqldbv2
+package sqldb
 
 import (
 	"testing"

@@ -40,7 +40,7 @@ require (
 	github.com/lightningnetwork/lnd/kvdb v1.4.16
 	github.com/lightningnetwork/lnd/queue v1.1.1
 	github.com/lightningnetwork/lnd/sqldb v1.0.10
-	github.com/lightningnetwork/lnd/sqldbv2 v1.0.0
+	github.com/lightningnetwork/lnd/sqldb/v2 v2.0.0
 	github.com/lightningnetwork/lnd/ticker v1.1.1
 	github.com/lightningnetwork/lnd/tlv v1.3.2
 	github.com/lightningnetwork/lnd/tor v1.1.6
@@ -204,7 +204,7 @@ require (
 // store have been included in a tagged sqldb version.
 replace github.com/lightningnetwork/lnd/sqldb => ./sqldb
 
-replace github.com/lightningnetwork/lnd/sqldbv2 => ./sqldbv2
+replace github.com/lightningnetwork/lnd/sqldb/v2 => ./sqldb/v2
 
 // This replace is for https://github.com/advisories/GHSA-25xm-hr59-7c27
 replace github.com/ulikunitz/xz => github.com/ulikunitz/xz v0.5.11

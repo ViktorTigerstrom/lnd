@@ -7,7 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/lightningnetwork/lnd/sqldbv2"
+	"github.com/lightningnetwork/lnd/sqldb/v2"
 	"testing"
 
 	"github.com/lightningnetwork/lnd/sqldb/sqlc"

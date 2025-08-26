@@ -1,6 +1,6 @@
 package sqlc
 
-import sqldb "github.com/lightningnetwork/lnd/sqldbv2"
+import "github.com/lightningnetwork/lnd/sqldb/v2"
 
 // wrappedTX is a wrapper around a DBTX that also stores the database backend
 // type.

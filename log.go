@@ -56,7 +56,7 @@ import (
 	"github.com/lightningnetwork/lnd/rpcperms"
 	"github.com/lightningnetwork/lnd/signal"
 	"github.com/lightningnetwork/lnd/sqldb"
-	"github.com/lightningnetwork/lnd/sqldbv2"
+	sqldbv2 "github.com/lightningnetwork/lnd/sqldb/v2"
 	"github.com/lightningnetwork/lnd/sqlmodel"
 	"github.com/lightningnetwork/lnd/sweep"
 	"github.com/lightningnetwork/lnd/tor"
