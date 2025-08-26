@@ -14,12 +14,16 @@ var (
 	MaxValidSQLTime = time.Date(9999, 12, 31, 23, 59, 59, 999999, time.UTC)
 )
 
-// SqlInt16 turns a numerical integer type into the NullInt16 that sql/sqlc
+// NoOpReset is a no-op function that can be used as a default
+// reset function ExecTx calls.
+var NoOpReset = func() {}
+
+// SQLInt16 turns a numerical integer type into the NullInt16 that sql/sqlc
 // uses when an integer field can be permitted to be NULL.
 //
-// We use the constraints.Integer constraint here which maps to all signed and
+// We use this constraints.Integer constraint here which maps to all signed and
 // unsigned integer types.
-func SqlInt16[T constraints.Integer](num T) sql.NullInt16 {
+func SQLInt16[T constraints.Integer](num T) sql.NullInt16 {
 	return sql.NullInt16{
 		Int16: int16(num),
 		Valid: true,

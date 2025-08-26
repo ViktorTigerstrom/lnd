@@ -3,7 +3,7 @@ package sqldbv2
 import "github.com/btcsuite/btclog/v2"
 
 // Subsystem defines the logging code for this subsystem.
-const Subsystem = "SQV2"
+const Subsystem = "SQL2"
 
 // log is a logger that is initialized with no output filters.  This
 // means the package will not perform any logging by default until the caller

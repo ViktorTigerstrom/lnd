@@ -60,7 +60,7 @@ func makePostStepCallbacks(db *sqldb.BaseDB,
 			_ database.Driver) error {
 
 			return executor.ExecTx(
-				ctx, sqldb.NewWriteTx(),
+				ctx, sqldb.WriteTxOpt(),
 				func(q *sqlc.Queries) error {
 					return runCheck(m, q)
 				}, sqldb.NoOpReset,

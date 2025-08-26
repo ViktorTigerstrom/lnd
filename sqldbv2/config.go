@@ -40,6 +40,17 @@ type SqliteConfig struct {
 	// SkipMigrationDbBackup if true, then a backup of the database will not
 	// be created before applying migrations.
 	SkipMigrationDbBackup bool `long:"skipmigrationdbbackup" description:"Skip creating a backup of the database before applying migrations."`
+
+	QueryConfig `group:"query" namespace:"query"`
+}
+
+// Validate checks that the SqliteConfig values are valid.
+func (p *SqliteConfig) Validate() error {
+	if err := p.QueryConfig.Validate(true); err != nil {
+		return fmt.Errorf("invalid query config: %w", err)
+	}
+
+	return nil
 }
 
 // PostgresConfig holds the postgres database configuration.
@@ -54,8 +65,10 @@ type PostgresConfig struct {
 	ConnMaxIdleTime    time.Duration `long:"connmaxidletime" description:"Max amount of time a connection can be idle for before it is closed. Valid time units are {s, m, h}."`
 	RequireSSL         bool          `long:"requiressl" description:"Whether to require using SSL (mode: require) when connecting to the server."`
 	SkipMigrations     bool          `long:"skipmigrations" description:"Skip applying migrations on startup."`
+	QueryConfig        `group:"query" namespace:"query"`
 }
 
+// Validate checks that the PostgresConfig values are valid.
 func (p *PostgresConfig) Validate() error {
 	if p.Dsn == "" {
 		return fmt.Errorf("DSN is required")
@@ -65,6 +78,10 @@ func (p *PostgresConfig) Validate() error {
 	_, err := url.Parse(p.Dsn)
 	if err != nil {
 		return fmt.Errorf("invalid DSN: %w", err)
+	}
+
+	if err := p.QueryConfig.Validate(false); err != nil {
+		return fmt.Errorf("invalid query config: %w", err)
 	}
 
 	return nil

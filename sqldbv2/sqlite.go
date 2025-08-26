@@ -278,7 +278,7 @@ func (s *SqliteStore) SkipMigrations() bool {
 
 // NewTestSqliteDB is a helper function that creates an SQLite database for
 // testing.
-func NewTestSqliteDB(t *testing.T, streams []MigrationStream) *SqliteStore {
+func NewTestSqliteDB(t testing.TB, streams []MigrationStream) *SqliteStore {
 	t.Helper()
 
 	t.Logf("Creating new SQLite DB for testing")
