@@ -380,6 +380,17 @@ func (t *replacerFile) Close() error {
 	return nil
 }
 
+// MigrationTxOptions is the implementation of the TxOptions interface for
+// migration transactions.
+type MigrationTxOptions struct {
+}
+
+// ReadOnly returns false to indicate that migration transactions are not read
+// only.
+func (m *MigrationTxOptions) ReadOnly() bool {
+	return false
+}
+
 // ApplyAllMigrations applies both the SQLC and custom in-code migrations to the
 // SQLite database.
 func ApplyAllMigrations(executor MigrationExecutor,
